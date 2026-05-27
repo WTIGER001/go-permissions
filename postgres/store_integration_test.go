@@ -1,0 +1,130 @@
+package postgres
+
+import (
+	"context"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wtiger001/go-permissions"
+)
+
+func newTestStore(t *testing.T) (*Store, *pgxpool.Pool) {
+	t.Helper()
+
+	pgCfg := CreateDefaultPostgresqlContainer(t)
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, pgCfg.ConnectionString())
+	if err != nil {
+		t.Fatalf("create pgx pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	store := NewStore(pool)
+	if err := store.EnsureSchema(ctx); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+
+	return store, pool
+}
+
+func TestEnsureSchemaCreatesCoreTables(t *testing.T) {
+	_, pool := newTestStore(t)
+	ctx := context.Background()
+
+	for _, table := range []string{
+		"users",
+		"groups",
+		"roles",
+		"group_members",
+		"group_closure",
+		"principal_roles",
+		"permission_grants",
+	} {
+		var exists string
+		if err := pool.QueryRow(ctx, "select to_regclass('public.' || $1)", table).Scan(&exists); err != nil {
+			t.Fatalf("lookup table %s: %v", table, err)
+		}
+		if exists == "" {
+			t.Fatalf("expected table %s to exist", table)
+		}
+	}
+}
+
+func TestStoreQueries_EndToEnd(t *testing.T) {
+	store, pool := newTestStore(t)
+	ctx := context.Background()
+
+	seedStatements := []string{
+		"insert into users (id, display_name) values ('u-1', 'User One')",
+		"insert into groups (id, name) values ('g-child', 'Child Group')",
+		"insert into groups (id, name) values ('g-parent', 'Parent Group')",
+		"insert into group_members (group_id, user_id) values ('g-child', 'u-1')",
+		"insert into group_closure (ancestor_group_id, descendant_group_id, depth) values ('g-child', 'g-child', 0)",
+		"insert into group_closure (ancestor_group_id, descendant_group_id, depth) values ('g-parent', 'g-parent', 0)",
+		"insert into group_closure (ancestor_group_id, descendant_group_id, depth) values ('g-parent', 'g-child', 1)",
+		"insert into roles (id, code) values ('r-base', 'base')",
+		"insert into roles (id, code) values ('r-child', 'child')",
+		"insert into role_closure (ancestor_role_id, descendant_role_id, depth) values ('r-base', 'r-base', 0)",
+		"insert into role_closure (ancestor_role_id, descendant_role_id, depth) values ('r-base', 'r-child', 1)",
+		"insert into role_closure (ancestor_role_id, descendant_role_id, depth) values ('r-child', 'r-child', 0)",
+		"insert into principal_roles (principal_kind, principal_id, role_id, binding_values) values ('user', 'u-1', 'r-base', '{\"team\":42}')",
+		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('user', 'u-1', 'allow', '42', null, 'billing.read', '{}'::jsonb)",
+		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('group', 'g-parent', 'allow', '42', '*', 'billing.read', '{}'::jsonb)",
+		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('role', 'r-child', 'deny', '42', 'billing', 'billing.read', '{}'::jsonb)",
+	}
+
+	for _, stmt := range seedStatements {
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			t.Fatalf("seed statement failed (%s): %v", stmt, err)
+		}
+	}
+
+	groupIDs, err := store.ListUserGroupIDs(ctx, "u-1")
+	if err != nil {
+		t.Fatalf("ListUserGroupIDs: %v", err)
+	}
+	if len(groupIDs) != 2 {
+		t.Fatalf("expected 2 group IDs, got %d (%v)", len(groupIDs), groupIDs)
+	}
+
+	roleAssignments, err := store.ListRoleAssignmentsForUserAndGroups(ctx, "u-1", groupIDs)
+	if err != nil {
+		t.Fatalf("ListRoleAssignmentsForUserAndGroups: %v", err)
+	}
+	if len(roleAssignments) != 1 {
+		t.Fatalf("expected 1 role assignment, got %d", len(roleAssignments))
+	}
+	if roleAssignments[0].RoleID != "r-base" {
+		t.Fatalf("expected role assignment r-base, got %s", roleAssignments[0].RoleID)
+	}
+
+	expandedRoleIDs, err := store.ListExpandedRoleIDs(ctx, []string{"r-base"})
+	if err != nil {
+		t.Fatalf("ListExpandedRoleIDs: %v", err)
+	}
+	if len(expandedRoleIDs) != 2 {
+		t.Fatalf("expected 2 expanded roles, got %d (%v)", len(expandedRoleIDs), expandedRoleIDs)
+	}
+
+	teamID := int64(42)
+	owners := []permissions.PrincipalRef{
+		{Kind: permissions.PrincipalUser, ID: "u-1"},
+		{Kind: permissions.PrincipalGroup, ID: "g-parent"},
+		{Kind: permissions.PrincipalRole, ID: "r-child"},
+	}
+
+	grants, err := store.ListGrantsForOwners(ctx, owners, permissions.Request{
+		UserID: "u-1",
+		TeamID: &teamID,
+		Object: "billing",
+		Perm:   "billing.read",
+	})
+	if err != nil {
+		t.Fatalf("ListGrantsForOwners: %v", err)
+	}
+	if len(grants) != 3 {
+		t.Fatalf("expected 3 matching grants, got %d", len(grants))
+	}
+}

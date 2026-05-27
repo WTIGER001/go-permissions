@@ -55,6 +55,14 @@ type EffectivePermission struct {
 	Fields         []string
 }
 
+type PrincipalHit struct {
+	Kind           PrincipalKind
+	ID             string
+	TeamScope      string
+	ObjectScope    *string
+	PermissionName string
+}
+
 func (r PrincipalRef) Validate() error {
 	if r.ID == "" {
 		return fmt.Errorf("principal ID is required")

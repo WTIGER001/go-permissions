@@ -1050,7 +1050,7 @@ Recommended semantics:
 For list endpoints where many leaf nodes share parent lineage, use a specialized helper.
 
 ```go
-allowedLeafIDs, err := FileRead.HierarchicalFilter(ctx, u, leafIDs, sharedParentPath)
+allowedLeafIDs, err := FileRead.HierarallhicalFilter(ctx, u, leafIDs, sharedParentPath)
 if err != nil {
 	return err
 }

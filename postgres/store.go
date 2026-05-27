@@ -377,3 +377,157 @@ where ($3::text = '' or pg.permission_name = $3)
 
 	return grants, nil
 }
+
+func (s *Store) ListPrincipalsWithGrant(ctx context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
+	if req.Perm == "" {
+		return nil, fmt.Errorf("permission name is required")
+	}
+
+	var teamScope *string
+	if req.TeamID != nil {
+		value := fmt.Sprintf("%d", *req.TeamID)
+		teamScope = &value
+	}
+
+	const query = `
+select distinct
+	pg.owner_kind,
+	pg.owner_id,
+	pg.team_scope,
+	pg.object_scope,
+	pg.permission_name
+from permission_grants pg
+where pg.effect = 'allow'
+	and pg.permission_name = $1
+	and (
+		($2::text is null and pg.team_scope = '*')
+		or
+		($2::text is not null and (pg.team_scope = '*' or pg.team_scope = $2::text))
+	)
+	and (pg.object_scope is null or pg.object_scope = '*' or pg.object_scope = $3::text)
+	and not exists (
+		select 1
+		from permission_grants pd
+		where pd.owner_kind = pg.owner_kind
+			and pd.owner_id = pg.owner_id
+			and pd.effect = 'deny'
+			and pd.permission_name = $1
+			and (
+				($2::text is null and pd.team_scope = '*')
+				or
+				($2::text is not null and (pd.team_scope = '*' or pd.team_scope = $2::text))
+			)
+			and (pd.object_scope is null or pd.object_scope = '*' or pd.object_scope = $3::text)
+	)
+`
+
+	rows, err := s.pool.Query(ctx, query, req.Perm, teamScope, req.Object)
+	if err != nil {
+		return nil, fmt.Errorf("query principals with grant: %w", err)
+	}
+	defer rows.Close()
+
+	hits := make([]permissions.PrincipalHit, 0, 16)
+	for rows.Next() {
+		var hit permissions.PrincipalHit
+		var ownerKind string
+		if err := rows.Scan(&ownerKind, &hit.ID, &hit.TeamScope, &hit.ObjectScope, &hit.PermissionName); err != nil {
+			return nil, fmt.Errorf("scan principal hit: %w", err)
+		}
+		hit.Kind = permissions.PrincipalKind(ownerKind)
+		hits = append(hits, hit)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate principals with grant: %w", err)
+	}
+
+	return hits, nil
+}
+
+func (s *Store) CreateGrant(ctx context.Context, grant permissions.Grant) error {
+	if grant.OwnerID == "" {
+		return fmt.Errorf("owner ID is required")
+	}
+	if grant.PermissionName == "" {
+		return fmt.Errorf("permission name is required")
+	}
+	if grant.TeamScope == "" {
+		return fmt.Errorf("team scope is required")
+	}
+
+	variableSpec := map[string]any{}
+	for k, v := range grant.VariableSpec {
+		variableSpec[k] = v
+	}
+
+	variableSpecRaw, err := json.Marshal(variableSpec)
+	if err != nil {
+		return fmt.Errorf("marshal variable spec: %w", err)
+	}
+
+	const stmt = `
+insert into permission_grants (
+	owner_kind,
+	owner_id,
+	effect,
+	team_scope,
+	object_scope,
+	permission_name,
+	field_allowlist,
+	variable_spec
+) values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+`
+
+	if _, err := s.pool.Exec(
+		ctx,
+		stmt,
+		string(grant.OwnerKind),
+		grant.OwnerID,
+		string(grant.Effect),
+		grant.TeamScope,
+		grant.ObjectScope,
+		grant.PermissionName,
+		grant.FieldAllowlist,
+		variableSpecRaw,
+	); err != nil {
+		return fmt.Errorf("insert permission grant: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Store) AssignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string, bindingValues map[string]any) error {
+	if err := principal.Validate(); err != nil {
+		return err
+	}
+	if principal.Kind != permissions.PrincipalUser && principal.Kind != permissions.PrincipalGroup {
+		return fmt.Errorf("role assignments support only user or group principals")
+	}
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+
+	bindingCopy := map[string]any{}
+	for k, v := range bindingValues {
+		bindingCopy[k] = v
+	}
+	bindingRaw, err := json.Marshal(bindingCopy)
+	if err != nil {
+		return fmt.Errorf("marshal role binding values: %w", err)
+	}
+
+	const stmt = `
+insert into principal_roles (
+	principal_kind,
+	principal_id,
+	role_id,
+	binding_values
+) values ($1, $2, $3, $4::jsonb)
+`
+
+	if _, err := s.pool.Exec(ctx, stmt, string(principal.Kind), principal.ID, roleID, bindingRaw); err != nil {
+		return fmt.Errorf("insert principal role assignment: %w", err)
+	}
+
+	return nil
+}

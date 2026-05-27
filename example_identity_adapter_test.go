@@ -46,6 +46,10 @@ func (examplePolicyStore) ListGrantsForOwners(_ context.Context, owners []Princi
 	return nil, nil
 }
 
+func (examplePolicyStore) ListPrincipalsWithGrant(_ context.Context, _ Request) ([]PrincipalHit, error) {
+	return nil, nil
+}
+
 func ExampleNewServiceWithResolvers_customIdentityAdapter() {
 	identity := exampleIdentityAdapter{
 		groupMembership: map[string]map[string]bool{

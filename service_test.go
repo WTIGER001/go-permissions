@@ -3,6 +3,7 @@ package permissions
 import (
 	"context"
 	"reflect"
+	"sort"
 	"testing"
 )
 
@@ -12,6 +13,9 @@ type mockStore struct {
 	roleAssignments []RoleAssignment
 	expandedRoleIDs []string
 	grants          []Grant
+	principalHits   []PrincipalHit
+	writtenGrants   []Grant
+	assignedRoles   []RoleAssignment
 	err             error
 }
 
@@ -45,6 +49,26 @@ func (m *mockStore) ListExpandedRoleIDs(_ context.Context, _ []string) ([]string
 
 func (m *mockStore) ListGrantsForOwners(_ context.Context, _ []PrincipalRef, _ Request) ([]Grant, error) {
 	return append([]Grant(nil), m.grants...), m.err
+}
+
+func (m *mockStore) ListPrincipalsWithGrant(_ context.Context, _ Request) ([]PrincipalHit, error) {
+	return append([]PrincipalHit(nil), m.principalHits...), m.err
+}
+
+func (m *mockStore) CreateGrant(_ context.Context, grant Grant) error {
+	m.writtenGrants = append(m.writtenGrants, grant)
+	return m.err
+}
+
+func (m *mockStore) AssignRole(_ context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
+	assignment := RoleAssignment{RoleID: roleID, BindingValues: map[string]any{}}
+	for k, v := range bindingValues {
+		assignment.BindingValues[k] = v
+	}
+	assignment.BindingValues["principal_kind"] = string(principal.Kind)
+	assignment.BindingValues["principal_id"] = principal.ID
+	m.assignedRoles = append(m.assignedRoles, assignment)
+	return m.err
 }
 
 func TestHasPermission_DenyOverridesAllow(t *testing.T) {
@@ -156,5 +180,97 @@ func TestEffectivePermissions_DenyRemovesAllow(t *testing.T) {
 
 	if !reflect.DeepEqual(got.Source, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}) {
 		t.Fatalf("unexpected source %+v", got.Source)
+	}
+}
+
+func TestPrincipalsWithPermission_DenyOverridesAllow(t *testing.T) {
+	teamID := int64(42)
+	store := &mockStore{
+		principalHits: []PrincipalHit{
+			{Kind: PrincipalRole, ID: "r-2", TeamScope: "*", PermissionName: "billing.read"},
+			{Kind: PrincipalGroup, ID: "g-2", TeamScope: "42", PermissionName: "billing.read"},
+			{Kind: PrincipalUser, ID: "u-1", TeamScope: "42", PermissionName: "billing.read"},
+		},
+	}
+
+	svc := NewService(store)
+	hits, err := svc.PrincipalsWithPermission(context.Background(), &teamID, "billing", "billing.read")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(hits) != 3 {
+		t.Fatalf("expected 3 hits, got %d", len(hits))
+	}
+
+	got := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		got = append(got, string(hit.Kind)+":"+hit.ID)
+	}
+
+	sort.Strings(got)
+	expected := []string{"group:g-2", "role:r-2", "user:u-1"}
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatalf("expected %v, got %v", expected, got)
+	}
+}
+
+func TestPrincipalsWithPermission_Validation(t *testing.T) {
+	store := &mockStore{}
+	svc := NewService(store)
+
+	teamID := int64(0)
+	if _, err := svc.PrincipalsWithPermission(context.Background(), &teamID, "", "billing.read"); err == nil {
+		t.Fatalf("expected invalid team ID error")
+	}
+
+	if _, err := svc.PrincipalsWithPermission(context.Background(), nil, "", ""); err == nil {
+		t.Fatalf("expected empty permission error")
+	}
+}
+
+func TestAllowUser_WritesGrant(t *testing.T) {
+	store := &mockStore{}
+	svc := NewService(store)
+
+	objectID := "group-1"
+	if err := svc.AllowUser(context.Background(), "u-1", "groups.members.manage", &objectID); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(store.writtenGrants) != 1 {
+		t.Fatalf("expected one written grant, got %d", len(store.writtenGrants))
+	}
+
+	got := store.writtenGrants[0]
+	if got.OwnerKind != PrincipalUser || got.OwnerID != "u-1" {
+		t.Fatalf("unexpected owner %+v", got)
+	}
+	if got.Effect != EffectAllow || got.PermissionName != "groups.members.manage" || got.TeamScope != "*" {
+		t.Fatalf("unexpected grant values %+v", got)
+	}
+	if got.ObjectScope == nil || *got.ObjectScope != objectID {
+		t.Fatalf("unexpected object scope %+v", got.ObjectScope)
+	}
+}
+
+func TestAssignRoleToUser_WritesAssignment(t *testing.T) {
+	store := &mockStore{}
+	svc := NewService(store)
+
+	if err := svc.AssignRoleToUser(context.Background(), "u-7", "role.group_manager", map[string]any{"team": 42}); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(store.assignedRoles) != 1 {
+		t.Fatalf("expected one role assignment write, got %d", len(store.assignedRoles))
+	}
+
+	got := store.assignedRoles[0]
+	if got.RoleID != "role.group_manager" {
+		t.Fatalf("unexpected role ID %q", got.RoleID)
+	}
+	if got.BindingValues["principal_kind"] != "user" || got.BindingValues["principal_id"] != "u-7" {
+		t.Fatalf("unexpected principal binding %+v", got.BindingValues)
 	}
 }

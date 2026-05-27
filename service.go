@@ -3,6 +3,7 @@ package permissions
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -24,6 +25,60 @@ func NewServiceWithIdentity(identity IdentityResolver, policy PolicyStore) *Serv
 
 func NewServiceWithResolvers(identity IdentityResolver, policy PolicyStore) *Service {
 	return NewServiceWithIdentity(identity, policy)
+}
+
+func (s *Service) AllowUser(ctx context.Context, userID, permission string, objectID *string) error {
+	return s.createGrant(ctx, Grant{
+		OwnerKind:      PrincipalUser,
+		OwnerID:        userID,
+		Effect:         EffectAllow,
+		TeamScope:      "*",
+		ObjectScope:    cloneStringPointer(objectID),
+		PermissionName: permission,
+	})
+}
+
+func (s *Service) DenyUser(ctx context.Context, userID, permission string, objectID *string) error {
+	return s.createGrant(ctx, Grant{
+		OwnerKind:      PrincipalUser,
+		OwnerID:        userID,
+		Effect:         EffectDeny,
+		TeamScope:      "*",
+		ObjectScope:    cloneStringPointer(objectID),
+		PermissionName: permission,
+	})
+}
+
+func (s *Service) AllowRole(ctx context.Context, roleID, permission string, objectID *string) error {
+	return s.createGrant(ctx, Grant{
+		OwnerKind:      PrincipalRole,
+		OwnerID:        roleID,
+		Effect:         EffectAllow,
+		TeamScope:      "*",
+		ObjectScope:    cloneStringPointer(objectID),
+		PermissionName: permission,
+	})
+}
+
+func (s *Service) AssignRoleToUser(ctx context.Context, userID, roleID string, bindingValues map[string]any) error {
+	writer, ok := s.policy.(RoleAssignmentWriter)
+	if !ok {
+		return fmt.Errorf("policy store does not support role assignment writes")
+	}
+
+	if userID == "" {
+		return fmt.Errorf("user ID is required")
+	}
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+
+	copyBinding := map[string]any{}
+	for k, v := range bindingValues {
+		copyBinding[k] = v
+	}
+
+	return writer.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: userID}, roleID, copyBinding)
 }
 
 func (s *Service) HasSystemPermission(ctx context.Context, userID string, perm string) (bool, error) {
@@ -194,6 +249,49 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 	return result, nil
 }
 
+func (s *Service) PrincipalsWithPermission(ctx context.Context, teamID *int64, object, perm string) ([]PrincipalHit, error) {
+	if teamID != nil && *teamID <= 0 {
+		return nil, fmt.Errorf("team ID must be positive when provided")
+	}
+	if perm == "" {
+		return nil, fmt.Errorf("permission name is required")
+	}
+
+	hits, err := s.policy.ListPrincipalsWithGrant(ctx, Request{
+		TeamID: teamID,
+		Object: object,
+		Perm:   perm,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].Kind != hits[j].Kind {
+			return hits[i].Kind < hits[j].Kind
+		}
+		if hits[i].ID != hits[j].ID {
+			return hits[i].ID < hits[j].ID
+		}
+		if hits[i].TeamScope != hits[j].TeamScope {
+			return hits[i].TeamScope < hits[j].TeamScope
+		}
+
+		left := ""
+		right := ""
+		if hits[i].ObjectScope != nil {
+			left = *hits[i].ObjectScope
+		}
+		if hits[j].ObjectScope != nil {
+			right = *hits[j].ObjectScope
+		}
+
+		return left < right
+	})
+
+	return hits, nil
+}
+
 func grantMatchesRequest(grant Grant, req Request) bool {
 	if grant.PermissionName != req.Perm {
 		return false
@@ -323,4 +421,31 @@ func (s *Service) resolveUserGroupIDs(ctx context.Context, userID string) ([]str
 	}
 
 	return result, nil
+}
+
+func (s *Service) createGrant(ctx context.Context, grant Grant) error {
+	writer, ok := s.policy.(GrantWriter)
+	if !ok {
+		return fmt.Errorf("policy store does not support grant writes")
+	}
+
+	if grant.OwnerID == "" {
+		return fmt.Errorf("owner ID is required")
+	}
+	if grant.PermissionName == "" {
+		return fmt.Errorf("permission name is required")
+	}
+	if grant.TeamScope == "" {
+		return fmt.Errorf("team scope is required")
+	}
+
+	return writer.CreateGrant(ctx, grant)
+}
+
+func cloneStringPointer(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	copyValue := *v
+	return &copyValue
 }

@@ -2,6 +2,7 @@ package inmemory
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/wtiger001/go-permissions"
@@ -43,6 +44,33 @@ func (s *Store) SetRoleExpansion(roleID string, expandedRoleIDs ...string) {
 
 func (s *Store) AddGrants(grants ...permissions.Grant) {
 	s.grants = append(s.grants, grants...)
+}
+
+func (s *Store) CreateGrant(_ context.Context, grant permissions.Grant) error {
+	s.AddGrants(grant)
+	return nil
+}
+
+func (s *Store) AssignRole(_ context.Context, principal permissions.PrincipalRef, roleID string, bindingValues map[string]any) error {
+	if err := principal.Validate(); err != nil {
+		return err
+	}
+
+	assignment := permissions.RoleAssignment{RoleID: roleID, BindingValues: map[string]any{}}
+	for k, v := range bindingValues {
+		assignment.BindingValues[k] = v
+	}
+
+	switch principal.Kind {
+	case permissions.PrincipalUser:
+		s.AddUserRoleAssignments(principal.ID, assignment)
+	case permissions.PrincipalGroup:
+		s.AddGroupRoleAssignments(principal.ID, assignment)
+	default:
+		return fmt.Errorf("role assignments support only user or group principals")
+	}
+
+	return nil
 }
 
 func (s *Store) ListKnownGroupIDs(_ context.Context) ([]string, error) {
@@ -161,6 +189,65 @@ func (s *Store) ListGrantsForOwners(_ context.Context, owners []permissions.Prin
 		}
 
 		result = append(result, grant)
+	}
+
+	return result, nil
+}
+
+func (s *Store) ListPrincipalsWithGrant(_ context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
+	team := ""
+	hasTeam := req.TeamID != nil
+	if hasTeam {
+		team = strconv.FormatInt(*req.TeamID, 10)
+	}
+
+	allowByPrincipal := map[string]permissions.PrincipalHit{}
+	deniedPrincipal := map[string]bool{}
+
+	for _, grant := range s.grants {
+		if req.Perm != "" && grant.PermissionName != req.Perm {
+			continue
+		}
+
+		if hasTeam {
+			if grant.TeamScope != "*" && grant.TeamScope != team {
+				continue
+			}
+		} else if grant.TeamScope != "*" {
+			continue
+		}
+
+		if grant.ObjectScope != nil && *grant.ObjectScope != "*" && *grant.ObjectScope != req.Object {
+			continue
+		}
+
+		principalKey := string(grant.OwnerKind) + ":" + grant.OwnerID
+		if grant.Effect == permissions.EffectDeny {
+			deniedPrincipal[principalKey] = true
+			delete(allowByPrincipal, principalKey)
+			continue
+		}
+
+		if deniedPrincipal[principalKey] {
+			continue
+		}
+
+		if _, exists := allowByPrincipal[principalKey]; exists {
+			continue
+		}
+
+		allowByPrincipal[principalKey] = permissions.PrincipalHit{
+			Kind:           grant.OwnerKind,
+			ID:             grant.OwnerID,
+			TeamScope:      grant.TeamScope,
+			ObjectScope:    grant.ObjectScope,
+			PermissionName: grant.PermissionName,
+		}
+	}
+
+	result := make([]permissions.PrincipalHit, 0, len(allowByPrincipal))
+	for _, hit := range allowByPrincipal {
+		result = append(result, hit)
 	}
 
 	return result, nil

@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -126,5 +128,43 @@ func TestStoreQueries_EndToEnd(t *testing.T) {
 	}
 	if len(grants) != 3 {
 		t.Fatalf("expected 3 matching grants, got %d", len(grants))
+	}
+}
+
+func TestListPrincipalsWithGrant_DenyOverridesAllow(t *testing.T) {
+	store, pool := newTestStore(t)
+	ctx := context.Background()
+
+	seedStatements := []string{
+		"insert into users (id, display_name) values ('u-1', 'User One')",
+		"insert into groups (id, name) values ('g-1', 'Group One')",
+		"insert into roles (id, code) values ('r-1', 'Role One')",
+		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('user', 'u-1', 'allow', '42', null, 'billing.read', '{}'::jsonb)",
+		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('group', 'g-1', 'allow', '42', null, 'billing.read', '{}'::jsonb)",
+		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('group', 'g-1', 'deny', '42', '*', 'billing.read', '{}'::jsonb)",
+		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('role', 'r-1', 'allow', '*', null, 'billing.read', '{}'::jsonb)",
+	}
+
+	for _, stmt := range seedStatements {
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			t.Fatalf("seed statement failed (%s): %v", stmt, err)
+		}
+	}
+
+	teamID := int64(42)
+	hits, err := store.ListPrincipalsWithGrant(ctx, permissions.Request{TeamID: &teamID, Object: "billing", Perm: "billing.read"})
+	if err != nil {
+		t.Fatalf("ListPrincipalsWithGrant: %v", err)
+	}
+
+	got := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		got = append(got, string(hit.Kind)+":"+hit.ID)
+	}
+	sort.Strings(got)
+
+	expected := []string{"role:r-1", "user:u-1"}
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatalf("expected %v, got %v", expected, got)
 	}
 }

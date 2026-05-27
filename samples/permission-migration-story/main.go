@@ -7,29 +7,33 @@ import (
 
 	"github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
-	"github.com/wtiger001/go-permissions/samples/shared"
 )
 
 func main() {
 	ctx := context.Background()
 	store := inmemory.NewStore()
-	svc := permissions.NewService(store)
+	identity := inmemory.NewIdentityProvider()
+	svc := permissions.NewServiceWithProviders(store, identity)
 
 	teamID := int64(808)
 	teamScope := strconv.FormatInt(teamID, 10)
 	user := "legacy-user"
-	oldPerm := "reports.read"
-	newPerm := "reports.view"
+	oldPerm := permissions.NewTeamPermission("reports.read", "Reports", "Read Reports", "Allows reading reports.").WithChecker(svc)
+	newPerm := permissions.NewTeamPermission("reports.view", "Reports", "View Reports", "Allows viewing reports.").WithChecker(svc)
 
-	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: user, Effect: permissions.EffectAllow, TeamScope: teamScope, PermissionName: oldPerm})
+	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: user, Effect: permissions.EffectAllow, TeamScope: teamScope, PermissionName: oldPerm.ID()})
 
 	fmt.Println("before dual grant")
-	shared.PrintTeamCheck(ctx, svc, user, teamID, oldPerm, "legacy-user has reports.read")
-	shared.PrintTeamCheck(ctx, svc, user, teamID, newPerm, "legacy-user has reports.view")
+	okOldBefore := oldPerm.Can(ctx, user, teamID)
+	fmt.Printf("legacy-user has reports.read: %t\n", okOldBefore)
+	okNewBefore := newPerm.Can(ctx, user, teamID)
+	fmt.Printf("legacy-user has reports.view: %t\n", okNewBefore)
 	fmt.Println()
 
 	fmt.Println("after dual grant")
-	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: user, Effect: permissions.EffectAllow, TeamScope: teamScope, PermissionName: newPerm})
-	shared.PrintTeamCheck(ctx, svc, user, teamID, oldPerm, "legacy-user has reports.read")
-	shared.PrintTeamCheck(ctx, svc, user, teamID, newPerm, "legacy-user has reports.view")
+	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: user, Effect: permissions.EffectAllow, TeamScope: teamScope, PermissionName: newPerm.ID()})
+	okOldAfter := oldPerm.Can(ctx, user, teamID)
+	fmt.Printf("legacy-user has reports.read: %t\n", okOldAfter)
+	okNewAfter := newPerm.Can(ctx, user, teamID)
+	fmt.Printf("legacy-user has reports.view: %t\n", okNewAfter)
 }

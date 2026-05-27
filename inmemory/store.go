@@ -4,30 +4,27 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/wtiger001/go-permissions"
 )
 
 type Store struct {
-	userGroups           map[string][]string
 	userRoleAssignments  map[string][]permissions.RoleAssignment
 	groupRoleAssignments map[string][]permissions.RoleAssignment
 	roleExpansion        map[string][]string
 	grants               []permissions.Grant
 }
 
+var _ permissions.PermissionStore = (*Store)(nil)
+
 func NewStore() *Store {
 	return &Store{
-		userGroups:           map[string][]string{},
 		userRoleAssignments:  map[string][]permissions.RoleAssignment{},
 		groupRoleAssignments: map[string][]permissions.RoleAssignment{},
 		roleExpansion:        map[string][]string{},
 		grants:               []permissions.Grant{},
 	}
-}
-
-func (s *Store) AddUserGroups(userID string, groupIDs ...string) {
-	s.userGroups[userID] = append(s.userGroups[userID], groupIDs...)
 }
 
 func (s *Store) AddUserRoleAssignments(userID string, assignments ...permissions.RoleAssignment) {
@@ -73,64 +70,18 @@ func (s *Store) AssignRole(_ context.Context, principal permissions.PrincipalRef
 	return nil
 }
 
-func (s *Store) ListKnownGroupIDs(_ context.Context) ([]string, error) {
-	seen := map[string]bool{}
-	groupIDs := make([]string, 0)
-
-	for groupID := range s.groupRoleAssignments {
-		if !seen[groupID] {
-			seen[groupID] = true
-			groupIDs = append(groupIDs, groupID)
-		}
+func (s *Store) RoleAssignmentsForPrincipal(_ context.Context, principal permissions.PrincipalRef) ([]permissions.RoleAssignment, error) {
+	switch principal.Kind {
+	case permissions.PrincipalUser:
+		return append([]permissions.RoleAssignment(nil), s.userRoleAssignments[principal.ID]...), nil
+	case permissions.PrincipalGroup:
+		return append([]permissions.RoleAssignment(nil), s.groupRoleAssignments[principal.ID]...), nil
+	default:
+		return nil, nil
 	}
-
-	for _, grant := range s.grants {
-		if grant.OwnerKind != permissions.PrincipalGroup {
-			continue
-		}
-		if seen[grant.OwnerID] {
-			continue
-		}
-		seen[grant.OwnerID] = true
-		groupIDs = append(groupIDs, grant.OwnerID)
-	}
-
-	for _, groups := range s.userGroups {
-		for _, groupID := range groups {
-			if seen[groupID] {
-				continue
-			}
-			seen[groupID] = true
-			groupIDs = append(groupIDs, groupID)
-		}
-	}
-
-	return groupIDs, nil
 }
 
-func (s *Store) IsUserInGroup(_ context.Context, userID, groupID string) (bool, error) {
-	for _, g := range s.userGroups[userID] {
-		if g == groupID {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func (s *Store) ListUserGroupIDs(_ context.Context, userID string) ([]string, error) {
-	return append([]string(nil), s.userGroups[userID]...), nil
-}
-
-func (s *Store) ListRoleAssignmentsForUserAndGroups(_ context.Context, userID string, groupIDs []string) ([]permissions.RoleAssignment, error) {
-	result := make([]permissions.RoleAssignment, 0)
-	result = append(result, s.userRoleAssignments[userID]...)
-	for _, groupID := range groupIDs {
-		result = append(result, s.groupRoleAssignments[groupID]...)
-	}
-	return result, nil
-}
-
-func (s *Store) ListExpandedRoleIDs(_ context.Context, roleIDs []string) ([]string, error) {
+func (s *Store) ExpandRoles(_ context.Context, roleIDs []string) ([]string, error) {
 	seen := map[string]bool{}
 	expanded := make([]string, 0, len(roleIDs))
 
@@ -153,7 +104,8 @@ func (s *Store) ListExpandedRoleIDs(_ context.Context, roleIDs []string) ([]stri
 	return expanded, nil
 }
 
-func (s *Store) ListGrantsForOwners(_ context.Context, owners []permissions.PrincipalRef, req permissions.Request) ([]permissions.Grant, error) {
+func (s *Store) GrantsForOwners(_ context.Context, owners []permissions.PrincipalRef, req permissions.Request) ([]permissions.Grant, error) {
+	now := time.Now().UTC()
 	ownerSet := map[string]bool{}
 	for _, owner := range owners {
 		ownerSet[string(owner.Kind)+":"+owner.ID] = true
@@ -167,6 +119,9 @@ func (s *Store) ListGrantsForOwners(_ context.Context, owners []permissions.Prin
 
 	result := make([]permissions.Grant, 0, len(s.grants))
 	for _, grant := range s.grants {
+		if !grant.IsActiveAt(now) {
+			continue
+		}
 		if !ownerSet[string(grant.OwnerKind)+":"+grant.OwnerID] {
 			continue
 		}
@@ -194,7 +149,12 @@ func (s *Store) ListGrantsForOwners(_ context.Context, owners []permissions.Prin
 	return result, nil
 }
 
-func (s *Store) ListPrincipalsWithGrant(_ context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
+func (s *Store) GrantsForPrincipal(ctx context.Context, principal permissions.PrincipalRef) ([]permissions.Grant, error) {
+	return s.GrantsForOwners(ctx, []permissions.PrincipalRef{principal}, permissions.Request{})
+}
+
+func (s *Store) PrincipalsWithGrant(_ context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
+	now := time.Now().UTC()
 	team := ""
 	hasTeam := req.TeamID != nil
 	if hasTeam {
@@ -205,6 +165,9 @@ func (s *Store) ListPrincipalsWithGrant(_ context.Context, req permissions.Reque
 	deniedPrincipal := map[string]bool{}
 
 	for _, grant := range s.grants {
+		if !grant.IsActiveAt(now) {
+			continue
+		}
 		if req.Perm != "" && grant.PermissionName != req.Perm {
 			continue
 		}
@@ -251,4 +214,16 @@ func (s *Store) ListPrincipalsWithGrant(_ context.Context, req permissions.Reque
 	}
 
 	return result, nil
+}
+
+func (s *Store) RoleDefinitions(_ context.Context) ([]permissions.Role, error) {
+	return []permissions.Role{}, nil
+}
+
+func (s *Store) RoleDefinition(_ context.Context, roleID string) (permissions.Role, error) {
+	if roleID == "" {
+		return permissions.Role{}, fmt.Errorf("role ID is required")
+	}
+
+	return permissions.Role{ID: roleID, Name: roleID, VariableSpec: map[string]any{}, Permissions: []string{}}, nil
 }

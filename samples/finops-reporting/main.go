@@ -3,24 +3,24 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
-	"github.com/wtiger001/go-permissions/samples/shared"
 )
 
 func main() {
 	ctx := context.Background()
 	store := inmemory.NewStore()
-	svc := permissions.NewService(store)
+	identity := inmemory.NewIdentityProvider()
+	svc := permissions.NewServiceWithProviders(store, identity)
 
 	systemFinopsPerm := permissions.NewSystemPermission(
 		"finops.system.report.view",
 		"FinOps",
 		"View System Cost Report",
 		"Allows viewing system-wide cost reporting.",
-		true,
 	).WithChecker(svc)
 
 	teamFinopsPerm := permissions.NewTeamPermission(
@@ -28,7 +28,6 @@ func main() {
 		"FinOps",
 		"View Team Cost Report",
 		"Allows viewing team-level cost reporting.",
-		true,
 	).WithChecker(svc)
 
 	registry := permissions.NewPermissionRegistry()
@@ -41,7 +40,9 @@ func main() {
 	fmt.Println()
 
 	// Direct grants
-	shared.Must(svc.AllowUser(ctx, "alice", systemFinopsPerm.ID(), nil))
+	if err := svc.AllowUser(ctx, "alice", systemFinopsPerm.ID(), nil); err != nil {
+		panic(err)
+	}
 	store.AddGrants(permissions.Grant{
 		OwnerKind:      permissions.PrincipalUser,
 		OwnerID:        "bob",
@@ -51,7 +52,9 @@ func main() {
 	})
 
 	// Role-based grant and assignment
-	shared.Must(svc.AssignRoleToUser(ctx, "carol", "role.finops_team_reporter", nil))
+	if err := svc.AssignRoleToUser(ctx, "carol", "role.finops_team_reporter", nil); err != nil {
+		panic(err)
+	}
 	store.AddGrants(permissions.Grant{
 		OwnerKind:      permissions.PrincipalRole,
 		OwnerID:        "role.finops_team_reporter",
@@ -61,16 +64,28 @@ func main() {
 	})
 
 	fmt.Println("system-level checks")
-	shared.PrintSystemCheck(ctx, svc, "alice", systemFinopsPerm.ID(), "alice can view system-wide report")
-	shared.PrintSystemCheck(ctx, svc, "bob", systemFinopsPerm.ID(), "bob can view system-wide report")
+	okAlice := systemFinopsPerm.Can(ctx, "alice")
+	fmt.Printf("alice can view system-wide report: %t\n", okAlice)
+	okBob := systemFinopsPerm.Can(ctx, "bob")
+	fmt.Printf("bob can view system-wide report: %t\n", okBob)
 	fmt.Println()
 
 	fmt.Println("team-level checks")
-	shared.PrintTeamCheck(ctx, svc, "bob", 101, teamFinopsPerm.ID(), "bob can view team 101 report")
-	shared.PrintTeamCheck(ctx, svc, "bob", 202, teamFinopsPerm.ID(), "bob can view team 202 report")
-	shared.PrintTeamCheck(ctx, svc, "carol", 202, teamFinopsPerm.ID(), "carol can view team 202 report")
-	shared.PrintTeamCheck(ctx, svc, "carol", 303, teamFinopsPerm.ID(), "carol can view team 303 report")
-	shared.PrintTeamCheck(ctx, svc, "dave", 101, teamFinopsPerm.ID(), "dave can view team 101 report")
+	checks := []struct {
+		user  string
+		team  int64
+		label string
+	}{
+		{"bob", 101, "bob can view team 101 report"},
+		{"bob", 202, "bob can view team 202 report"},
+		{"carol", 202, "carol can view team 202 report"},
+		{"carol", 303, "carol can view team 303 report"},
+		{"dave", 101, "dave can view team 101 report"},
+	}
+	for _, check := range checks {
+		ok := teamFinopsPerm.Can(ctx, check.user, check.team)
+		fmt.Printf("%s: %t\n", check.label, ok)
+	}
 	fmt.Println()
 
 	fmt.Println("who has finops.system.report.view (grant owners)")
@@ -79,7 +94,7 @@ func main() {
 		fmt.Printf("query error: %v\n", err)
 		return
 	}
-	shared.PrintPrincipalHits(systemHits)
+	printPrincipalHits(systemHits)
 	fmt.Println()
 
 	fmt.Println("who has finops.team.report.view for team 202 (grant owners)")
@@ -89,5 +104,16 @@ func main() {
 		fmt.Printf("query error: %v\n", err)
 		return
 	}
-	shared.PrintPrincipalHits(teamHits)
+	printPrincipalHits(teamHits)
+}
+
+func printPrincipalHits(hits []permissions.PrincipalHit) {
+	labels := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		labels = append(labels, string(hit.Kind)+":"+hit.ID)
+	}
+	sort.Strings(labels)
+	for _, label := range labels {
+		fmt.Printf("- %s\n", label)
+	}
 }

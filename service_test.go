@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 )
 
 type mockStore struct {
@@ -17,6 +18,56 @@ type mockStore struct {
 	writtenGrants   []Grant
 	assignedRoles   []RoleAssignment
 	err             error
+}
+
+func (m *mockStore) GetUserGroups(_ context.Context, _ string) ([]string, error) {
+	return append([]string(nil), m.groupIDs...), m.err
+}
+
+func (m *mockStore) GetGroupMembers(_ context.Context, groupID string) ([]string, error) {
+	if groupID == "" {
+		return nil, m.err
+	}
+	if m.userID == "" {
+		return nil, m.err
+	}
+	for _, g := range m.groupIDs {
+		if g == groupID {
+			return []string{m.userID}, m.err
+		}
+	}
+	return nil, m.err
+}
+
+func (m *mockStore) RoleDefinitions(_ context.Context) ([]Role, error) {
+	return []Role{}, m.err
+}
+
+func (m *mockStore) RoleDefinition(_ context.Context, roleID string) (Role, error) {
+	return Role{ID: roleID, Name: roleID}, m.err
+}
+
+func (m *mockStore) RoleAssignmentsForPrincipal(_ context.Context, principal PrincipalRef) ([]RoleAssignment, error) {
+	if principal.Kind == PrincipalUser || principal.Kind == PrincipalGroup {
+		return append([]RoleAssignment(nil), m.roleAssignments...), m.err
+	}
+	return nil, m.err
+}
+
+func (m *mockStore) GrantsForPrincipal(_ context.Context, _ PrincipalRef) ([]Grant, error) {
+	return append([]Grant(nil), m.grants...), m.err
+}
+
+func (m *mockStore) ExpandRoles(_ context.Context, _ []string) ([]string, error) {
+	return append([]string(nil), m.expandedRoleIDs...), m.err
+}
+
+func (m *mockStore) GrantsForOwners(_ context.Context, _ []PrincipalRef, _ Request) ([]Grant, error) {
+	return append([]Grant(nil), m.grants...), m.err
+}
+
+func (m *mockStore) PrincipalsWithGrant(_ context.Context, _ Request) ([]PrincipalHit, error) {
+	return append([]PrincipalHit(nil), m.principalHits...), m.err
 }
 
 func (m *mockStore) ListKnownGroupIDs(_ context.Context) ([]string, error) {
@@ -92,7 +143,7 @@ func TestHasPermission_DenyOverridesAllow(t *testing.T) {
 		},
 	}
 
-	svc := NewService(store)
+	svc := NewServiceWithProviders(store, store)
 	allowed, err := svc.HasPermission(context.Background(), Request{
 		UserID: "u-1",
 		TeamID: &teamID,
@@ -124,7 +175,7 @@ func TestHasPermission_StrictMissingBindingReturnsError(t *testing.T) {
 		},
 	}
 
-	svc := NewService(store)
+	svc := NewServiceWithProviders(store, store)
 	_, err := svc.HasPermission(context.Background(), Request{
 		UserID: "u-1",
 		TeamID: &teamID,
@@ -163,7 +214,7 @@ func TestEffectivePermissions_DenyRemovesAllow(t *testing.T) {
 		},
 	}
 
-	svc := NewService(store)
+	svc := NewServiceWithProviders(store, store)
 	effective, err := svc.EffectivePermissions(context.Background(), "u-1", &teamID)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -193,7 +244,7 @@ func TestPrincipalsWithPermission_DenyOverridesAllow(t *testing.T) {
 		},
 	}
 
-	svc := NewService(store)
+	svc := NewServiceWithProviders(store, store)
 	hits, err := svc.PrincipalsWithPermission(context.Background(), &teamID, "billing", "billing.read")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -217,7 +268,7 @@ func TestPrincipalsWithPermission_DenyOverridesAllow(t *testing.T) {
 
 func TestPrincipalsWithPermission_Validation(t *testing.T) {
 	store := &mockStore{}
-	svc := NewService(store)
+	svc := NewServiceWithProviders(store, store)
 
 	teamID := int64(0)
 	if _, err := svc.PrincipalsWithPermission(context.Background(), &teamID, "", "billing.read"); err == nil {
@@ -231,7 +282,7 @@ func TestPrincipalsWithPermission_Validation(t *testing.T) {
 
 func TestAllowUser_WritesGrant(t *testing.T) {
 	store := &mockStore{}
-	svc := NewService(store)
+	svc := NewServiceWithProviders(store, store)
 
 	objectID := "group-1"
 	if err := svc.AllowUser(context.Background(), "u-1", "groups.members.manage", &objectID); err != nil {
@@ -256,7 +307,7 @@ func TestAllowUser_WritesGrant(t *testing.T) {
 
 func TestAssignRoleToUser_WritesAssignment(t *testing.T) {
 	store := &mockStore{}
-	svc := NewService(store)
+	svc := NewServiceWithProviders(store, store)
 
 	if err := svc.AssignRoleToUser(context.Background(), "u-7", "role.group_manager", map[string]any{"team": 42}); err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -272,5 +323,61 @@ func TestAssignRoleToUser_WritesAssignment(t *testing.T) {
 	}
 	if got.BindingValues["principal_kind"] != "user" || got.BindingValues["principal_id"] != "u-7" {
 		t.Fatalf("unexpected principal binding %+v", got.BindingValues)
+	}
+}
+
+func TestAllowUserFor_WritesExpiringGrant(t *testing.T) {
+	store := &mockStore{}
+	svc := NewServiceWithProviders(store, store)
+
+	if err := svc.AllowUserFor(context.Background(), "u-1", "groups.members.manage", nil, 5*time.Minute); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(store.writtenGrants) != 1 {
+		t.Fatalf("expected one written grant, got %d", len(store.writtenGrants))
+	}
+
+	got := store.writtenGrants[0]
+	if got.ExpiresAt == nil {
+		t.Fatalf("expected expires_at to be set")
+	}
+	if !got.ExpiresAt.After(time.Now().UTC()) {
+		t.Fatalf("expected expires_at in the future, got %v", got.ExpiresAt)
+	}
+}
+
+func TestAllowUserFor_RejectsNonPositiveTTL(t *testing.T) {
+	store := &mockStore{}
+	svc := NewServiceWithProviders(store, store)
+
+	if err := svc.AllowUserFor(context.Background(), "u-1", "groups.members.manage", nil, 0); err == nil {
+		t.Fatalf("expected ttl validation error")
+	}
+}
+
+func TestHasPermission_IgnoresExpiredGrant(t *testing.T) {
+	teamID := int64(42)
+	expiredAt := time.Now().UTC().Add(-1 * time.Minute)
+	store := &mockStore{
+		grants: []Grant{
+			{
+				OwnerKind:      PrincipalUser,
+				OwnerID:        "u-1",
+				Effect:         EffectAllow,
+				TeamScope:      "42",
+				PermissionName: "billing.read",
+				ExpiresAt:      &expiredAt,
+			},
+		},
+	}
+
+	svc := NewServiceWithProviders(store, store)
+	allowed, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", TeamID: &teamID, Perm: "billing.read"})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if allowed {
+		t.Fatalf("expected expired grant to be ignored")
 	}
 }

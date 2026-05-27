@@ -2,16 +2,20 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
-	"github.com/wtiger001/go-permissions/samples/shared"
 )
 
 func main() {
 	ctx := context.Background()
 	store := inmemory.NewStore()
-	svc := permissions.NewService(store)
+	identity := inmemory.NewIdentityProvider()
+	svc := permissions.NewServiceWithProviders(store, identity)
+
+	projectsViewPerm := permissions.NewTeamPermission("projects.view", "Projects", "View Projects", "Allows viewing projects for a team.").WithChecker(svc)
+	projectsCreatePerm := permissions.NewTeamPermission("projects.create", "Projects", "Create Projects", "Allows creating projects for a team.").WithChecker(svc)
 
 	team555 := int64(555)
 
@@ -20,9 +24,21 @@ func main() {
 		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.tenant_starter", Effect: permissions.EffectAllow, TeamScope: "?team", PermissionName: "projects.create", VariableSpec: map[string]any{"team": "required"}},
 	)
 
-	shared.Must(svc.AssignRoleToUser(ctx, "tenant-admin", "role.tenant_starter", map[string]any{"team": team555}))
+	if err := svc.AssignRoleToUser(ctx, "tenant-admin", "role.tenant_starter", map[string]any{"team": team555}); err != nil {
+		panic(err)
+	}
 
-	shared.PrintTeamCheck(ctx, svc, "tenant-admin", 555, "projects.view", "tenant-admin can view projects on team 555")
-	shared.PrintTeamCheck(ctx, svc, "tenant-admin", 555, "projects.create", "tenant-admin can create projects on team 555")
-	shared.PrintTeamCheck(ctx, svc, "tenant-admin", 777, "projects.view", "tenant-admin can view projects on team 777")
+	checks := []struct {
+		team int64
+		perm *permissions.TeamPermission
+		msg  string
+	}{
+		{555, projectsViewPerm, "tenant-admin can view projects on team 555"},
+		{555, projectsCreatePerm, "tenant-admin can create projects on team 555"},
+		{777, projectsViewPerm, "tenant-admin can view projects on team 777"},
+	}
+	for _, check := range checks {
+		ok := check.perm.Can(ctx, "tenant-admin", check.team)
+		fmt.Printf("%s: %t\n", check.msg, ok)
+	}
 }

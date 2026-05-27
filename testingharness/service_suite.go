@@ -16,7 +16,8 @@ type EffectiveExpectation struct {
 }
 
 type HarnessStore interface {
-	permissions.Store
+	permissions.PermissionStore
+	permissions.IdentityProvider
 
 	HarnessName() string
 	Reset(ctx context.Context, t *testing.T)
@@ -48,7 +49,7 @@ func (h *Harness) RunAll(t *testing.T) {
 	t.Run(name+"/HasPermission_deny_overrides_allow", func(t *testing.T) {
 		ctx := context.Background()
 		h.store.Reset(ctx, t)
-		svc := permissions.NewService(h.store)
+		svc := permissions.NewServiceWithProviders(h.store, h.store)
 
 		req := h.store.SeedDenyOverridesAllow(ctx, t)
 		allowed, err := svc.HasPermission(ctx, req)
@@ -63,7 +64,7 @@ func (h *Harness) RunAll(t *testing.T) {
 	t.Run(name+"/HasPermission_strict_binding_error", func(t *testing.T) {
 		ctx := context.Background()
 		h.store.Reset(ctx, t)
-		svc := permissions.NewService(h.store)
+		svc := permissions.NewServiceWithProviders(h.store, h.store)
 
 		req := h.store.SeedStrictBindingError(ctx, t)
 		_, err := svc.HasPermission(ctx, req)
@@ -75,7 +76,7 @@ func (h *Harness) RunAll(t *testing.T) {
 	t.Run(name+"/EffectivePermissions_filters_denied", func(t *testing.T) {
 		ctx := context.Background()
 		h.store.Reset(ctx, t)
-		svc := permissions.NewService(h.store)
+		svc := permissions.NewServiceWithProviders(h.store, h.store)
 
 		expect := h.store.SeedEffectivePermissions(ctx, t)
 		perms, err := svc.EffectivePermissions(ctx, expect.UserID, expect.TeamID)

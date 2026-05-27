@@ -30,14 +30,9 @@ func ExampleSystemPermission() {
 		"Finops",
 		"View System Cost Report",
 		"Allows viewing system-wide cost reporting.",
-		true,
 	).WithChecker(checker)
 
-	ok, err := p.Can(context.Background(), "user-123")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	ok := p.Can(context.Background(), "user-123")
 
 	fmt.Println(ok)
 	// Output: true
@@ -50,12 +45,11 @@ func ExampleObjectPermission_batch() {
 		"User",
 		"View User",
 		"Allows reading a user profile.",
-		true,
 	).WithChecker(checker)
 
-	any, _ := p.Any(context.Background(), "user-123", "user-2", "user-1")
-	all, _ := p.All(context.Background(), "user-123", "user-2", "user-1")
-	filtered, _ := p.Filter(context.Background(), "user-123", "user-2", "user-1")
+	any := p.Any(context.Background(), "user-123", "user-2", "user-1")
+	all := p.All(context.Background(), "user-123", "user-2", "user-1")
+	filtered := p.Filter(context.Background(), "user-123", "user-2", "user-1")
 
 	fmt.Println(any)
 	fmt.Println(all)
@@ -73,10 +67,9 @@ func ExampleObjectPermission_hierarchicalFilter() {
 		"Folders",
 		"Read File Contents",
 		"Allows reading files in a hierarchy.",
-		true,
 	).WithChecker(checker)
 
-	allowed, _ := p.HierarchicalFilter(
+	allowed := p.HierarchicalFilter(
 		context.Background(),
 		"user-123",
 		[]string{"file-2", "file-1"},

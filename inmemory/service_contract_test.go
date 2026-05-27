@@ -10,10 +10,11 @@ import (
 
 type harnessStore struct {
 	*Store
+	*IdentityProvider
 }
 
 func TestInMemoryServiceContractSuite(t *testing.T) {
-	h := testingharness.NewHarness(&harnessStore{Store: NewStore()})
+	h := testingharness.NewHarness(&harnessStore{Store: NewStore(), IdentityProvider: NewIdentityProvider()})
 	h.RunAll(t)
 }
 
@@ -22,15 +23,15 @@ func (s *harnessStore) HarnessName() string {
 }
 
 func (s *harnessStore) Reset(_ context.Context, _ *testing.T) {
-	s.userGroups = map[string][]string{}
 	s.userRoleAssignments = map[string][]permissions.RoleAssignment{}
 	s.groupRoleAssignments = map[string][]permissions.RoleAssignment{}
 	s.roleExpansion = map[string][]string{}
 	s.grants = []permissions.Grant{}
+	s.IdentityProvider.userGroups = map[string][]string{}
 }
 
 func (s *harnessStore) SeedDenyOverridesAllow(_ context.Context, _ *testing.T) permissions.Request {
-	s.AddUserGroups("u-1", "g-1")
+	s.IdentityProvider.AddUserGroups("u-1", "g-1")
 	s.AddGrants(
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "u-1", Effect: permissions.EffectAllow, TeamScope: "42", PermissionName: "billing.read"},
 		permissions.Grant{OwnerKind: permissions.PrincipalGroup, OwnerID: "g-1", Effect: permissions.EffectDeny, TeamScope: "42", ObjectScope: strPtr("*"), PermissionName: "billing.read"},

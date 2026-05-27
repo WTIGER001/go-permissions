@@ -3,23 +3,23 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
-	"github.com/wtiger001/go-permissions/samples/shared"
 )
 
 func main() {
 	ctx := context.Background()
 	store := inmemory.NewStore()
-	svc := permissions.NewService(store)
+	identity := inmemory.NewIdentityProvider()
+	svc := permissions.NewServiceWithProviders(store, identity)
 
 	fileReadPerm := permissions.NewObjectPermission(
 		"folders.file.read",
 		"Folders",
 		"Read File",
 		"Allows reading file contents for a specific hierarchical object path.",
-		true,
 	).WithChecker(svc)
 
 	registry := permissions.NewPermissionRegistry()
@@ -45,20 +45,32 @@ func main() {
 	fmt.Printf("- roadmap: %s\n", roadmapPath)
 	fmt.Println()
 
-	shared.Must(svc.AllowUser(ctx, "alice", fileReadPerm.ID(), shared.StrPtr(budgetPath)))
-	shared.Must(svc.AllowUser(ctx, "alice", fileReadPerm.ID(), shared.StrPtr(payrollPath)))
+	if err := svc.AllowUser(ctx, "alice", fileReadPerm.ID(), &budgetPath); err != nil {
+		panic(err)
+	}
+	if err := svc.AllowUser(ctx, "alice", fileReadPerm.ID(), &payrollPath); err != nil {
+		panic(err)
+	}
 
-	shared.Must(svc.AllowRole(ctx, "role.finance_folder_reader", fileReadPerm.ID(), shared.StrPtr(budgetPath)))
-	shared.Must(svc.AllowRole(ctx, "role.finance_folder_reader", fileReadPerm.ID(), shared.StrPtr(payrollPath)))
-	shared.Must(svc.AssignRoleToUser(ctx, "bob", "role.finance_folder_reader", nil))
-	shared.Must(svc.DenyUser(ctx, "carol", fileReadPerm.ID(), shared.StrPtr(budgetPath)))
+	if err := svc.AllowRole(ctx, "role.finance_folder_reader", fileReadPerm.ID(), &budgetPath); err != nil {
+		panic(err)
+	}
+	if err := svc.AllowRole(ctx, "role.finance_folder_reader", fileReadPerm.ID(), &payrollPath); err != nil {
+		panic(err)
+	}
+	if err := svc.AssignRoleToUser(ctx, "bob", "role.finance_folder_reader", nil); err != nil {
+		panic(err)
+	}
+	if err := svc.DenyUser(ctx, "carol", fileReadPerm.ID(), &budgetPath); err != nil {
+		panic(err)
+	}
 
 	store.AddGrants(permissions.Grant{
 		OwnerKind:      permissions.PrincipalRole,
 		OwnerID:        "role.finance_folder_reader",
 		Effect:         permissions.EffectDeny,
 		TeamScope:      "*",
-		ObjectScope:    shared.StrPtr(payrollPath),
+		ObjectScope:    &payrollPath,
 		PermissionName: fileReadPerm.ID(),
 	})
 
@@ -77,7 +89,7 @@ func main() {
 		fmt.Printf("query error: %v\n", err)
 		return
 	}
-	shared.PrintPrincipalHits(budgetHits)
+	printPrincipalHits(budgetHits)
 	fmt.Println()
 
 	fmt.Println("who has folders.file.read on payroll path (grant owners)")
@@ -86,14 +98,21 @@ func main() {
 		fmt.Printf("query error: %v\n", err)
 		return
 	}
-	shared.PrintPrincipalHits(payrollHits)
+	printPrincipalHits(payrollHits)
 }
 
 func printHierarchicalCheck(ctx context.Context, p *permissions.ObjectPermission, userID, leafID string, parentPath []string, label string) {
-	ok, err := p.CanHierarchical(ctx, userID, leafID, parentPath...)
-	if err != nil {
-		fmt.Printf("%s: error=%v\n", label, err)
-		return
-	}
+	ok := p.CanHierarchical(ctx, userID, leafID, parentPath...)
 	fmt.Printf("%s: %t\n", label, ok)
+}
+
+func printPrincipalHits(hits []permissions.PrincipalHit) {
+	labels := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		labels = append(labels, string(hit.Kind)+":"+hit.ID)
+	}
+	sort.Strings(labels)
+	for _, label := range labels {
+		fmt.Printf("- %s\n", label)
+	}
 }

@@ -6,13 +6,12 @@ func TestPermissionRegistry_RegisterGetList(t *testing.T) {
 	r := NewPermissionRegistry()
 
 	def := PermissionDefinition{
-		ID:           "billing.read",
-		Scope:        PermissionScopeTeam,
-		Namespace:    "Billing",
-		Name:         "Read Billing",
-		Description:  "Allows reading billing data.",
-		AdminAllowed: true,
-		Fields:       []string{"amount", "currency"},
+		ID:          "billing.read",
+		Scope:       PermissionScopeTeam,
+		Namespace:   "Billing",
+		Name:        "Read Billing",
+		Description: "Allows reading billing data.",
+		Fields:      []string{"amount", "currency"},
 	}
 
 	if err := r.Register(def); err != nil {
@@ -104,7 +103,7 @@ func TestPermissionRegistry_ListByNamespace(t *testing.T) {
 }
 
 func TestPermissionDefinitionFromPermissionTypes(t *testing.T) {
-	systemDef := NewSystemPermission("system.audit.view", "Audit", "View Audit", "Allows reading audit logs.", true).
+	systemDef := NewSystemPermission("system.audit.view", "Audit", "View Audit", "Allows reading audit logs.").
 		WithFields([]string{"id", "timestamp"}).
 		Definition()
 
@@ -115,12 +114,12 @@ func TestPermissionDefinitionFromPermissionTypes(t *testing.T) {
 		t.Fatalf("unexpected ID %q", systemDef.ID)
 	}
 
-	teamDef := NewTeamPermission("billing.read", "Billing", "Read Billing", "Allows reading billing data.", true).Definition()
+	teamDef := NewTeamPermission("billing.read", "Billing", "Read Billing", "Allows reading billing data.").Definition()
 	if teamDef.Scope != PermissionScopeTeam {
 		t.Fatalf("expected team scope, got %q", teamDef.Scope)
 	}
 
-	objectDef := NewObjectPermission("file.read", "Files", "Read File", "Allows reading a file.", true).Definition()
+	objectDef := NewObjectPermission("file.read", "Files", "Read File", "Allows reading a file.").Definition()
 	if objectDef.Scope != PermissionScopeObject {
 		t.Fatalf("expected object scope, got %q", objectDef.Scope)
 	}

@@ -6,25 +6,28 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Service struct {
-	identity IdentityResolver
-	policy   PolicyStore
+	identity    IdentityProvider
+	permissions PermissionStore
 }
 
-func NewService(store Store) *Service {
-	return &Service{identity: store, policy: store}
+// NewService wires the service to a permission store and identity provider.
+func NewService(permissionStore PermissionStore, identityProvider IdentityProvider) *Service {
+	return &Service{identity: identityProvider, permissions: permissionStore}
 }
 
-// NewServiceWithIdentity wires a custom identity resolver with a policy store.
+// NewServiceWithProviders is an alias for NewService.
+func NewServiceWithProviders(permissionStore PermissionStore, identityProvider IdentityProvider) *Service {
+	return NewService(permissionStore, identityProvider)
+}
+
+// NewServiceWithIdentity wires a custom identity provider with a permission store.
 // This is the recommended constructor when users/groups/memberships are managed externally.
-func NewServiceWithIdentity(identity IdentityResolver, policy PolicyStore) *Service {
-	return &Service{identity: identity, policy: policy}
-}
-
-func NewServiceWithResolvers(identity IdentityResolver, policy PolicyStore) *Service {
-	return NewServiceWithIdentity(identity, policy)
+func NewServiceWithIdentity(identity IdentityProvider, permissionStore PermissionStore) *Service {
+	return NewService(permissionStore, identity)
 }
 
 func (s *Service) AllowUser(ctx context.Context, userID, permission string, objectID *string) error {
@@ -38,6 +41,25 @@ func (s *Service) AllowUser(ctx context.Context, userID, permission string, obje
 	})
 }
 
+func (s *Service) AllowUserUntil(ctx context.Context, userID, permission string, objectID *string, expiresAt time.Time) error {
+	return s.createGrant(ctx, Grant{
+		OwnerKind:      PrincipalUser,
+		OwnerID:        userID,
+		Effect:         EffectAllow,
+		TeamScope:      "*",
+		ObjectScope:    cloneStringPointer(objectID),
+		PermissionName: permission,
+		ExpiresAt:      cloneTimePointer(&expiresAt),
+	})
+}
+
+func (s *Service) AllowUserFor(ctx context.Context, userID, permission string, objectID *string, ttl time.Duration) error {
+	if ttl <= 0 {
+		return fmt.Errorf("ttl must be greater than zero")
+	}
+	return s.AllowUserUntil(ctx, userID, permission, objectID, time.Now().UTC().Add(ttl))
+}
+
 func (s *Service) DenyUser(ctx context.Context, userID, permission string, objectID *string) error {
 	return s.createGrant(ctx, Grant{
 		OwnerKind:      PrincipalUser,
@@ -47,6 +69,25 @@ func (s *Service) DenyUser(ctx context.Context, userID, permission string, objec
 		ObjectScope:    cloneStringPointer(objectID),
 		PermissionName: permission,
 	})
+}
+
+func (s *Service) DenyUserUntil(ctx context.Context, userID, permission string, objectID *string, expiresAt time.Time) error {
+	return s.createGrant(ctx, Grant{
+		OwnerKind:      PrincipalUser,
+		OwnerID:        userID,
+		Effect:         EffectDeny,
+		TeamScope:      "*",
+		ObjectScope:    cloneStringPointer(objectID),
+		PermissionName: permission,
+		ExpiresAt:      cloneTimePointer(&expiresAt),
+	})
+}
+
+func (s *Service) DenyUserFor(ctx context.Context, userID, permission string, objectID *string, ttl time.Duration) error {
+	if ttl <= 0 {
+		return fmt.Errorf("ttl must be greater than zero")
+	}
+	return s.DenyUserUntil(ctx, userID, permission, objectID, time.Now().UTC().Add(ttl))
 }
 
 func (s *Service) AllowRole(ctx context.Context, roleID, permission string, objectID *string) error {
@@ -60,10 +101,29 @@ func (s *Service) AllowRole(ctx context.Context, roleID, permission string, obje
 	})
 }
 
+func (s *Service) AllowRoleUntil(ctx context.Context, roleID, permission string, objectID *string, expiresAt time.Time) error {
+	return s.createGrant(ctx, Grant{
+		OwnerKind:      PrincipalRole,
+		OwnerID:        roleID,
+		Effect:         EffectAllow,
+		TeamScope:      "*",
+		ObjectScope:    cloneStringPointer(objectID),
+		PermissionName: permission,
+		ExpiresAt:      cloneTimePointer(&expiresAt),
+	})
+}
+
+func (s *Service) AllowRoleFor(ctx context.Context, roleID, permission string, objectID *string, ttl time.Duration) error {
+	if ttl <= 0 {
+		return fmt.Errorf("ttl must be greater than zero")
+	}
+	return s.AllowRoleUntil(ctx, roleID, permission, objectID, time.Now().UTC().Add(ttl))
+}
+
 func (s *Service) AssignRoleToUser(ctx context.Context, userID, roleID string, bindingValues map[string]any) error {
-	writer, ok := s.policy.(RoleAssignmentWriter)
+	writer, ok := s.permissions.(RoleAssignmentWriter)
 	if !ok {
-		return fmt.Errorf("policy store does not support role assignment writes")
+		return fmt.Errorf("permission store does not support role assignment writes")
 	}
 
 	if userID == "" {
@@ -100,12 +160,14 @@ func (s *Service) HasPermission(ctx context.Context, req Request) (bool, error) 
 		return false, fmt.Errorf("permission name is required")
 	}
 
+	now := time.Now().UTC()
+
 	groupIDs, err := s.resolveUserGroupIDs(ctx, req.UserID)
 	if err != nil {
 		return false, err
 	}
 
-	roleAssignments, err := s.policy.ListRoleAssignmentsForUserAndGroups(ctx, req.UserID, groupIDs)
+	roleAssignments, err := s.resolveRoleAssignmentsForUserAndGroups(ctx, req.UserID, groupIDs)
 	if err != nil {
 		return false, err
 	}
@@ -118,7 +180,7 @@ func (s *Service) HasPermission(ctx context.Context, req Request) (bool, error) 
 		bindingByRoleID[assignment.RoleID] = assignment.BindingValues
 	}
 
-	roleIDs, err := s.policy.ListExpandedRoleIDs(ctx, directRoleIDs)
+	roleIDs, err := s.permissions.ExpandRoles(ctx, directRoleIDs)
 	if err != nil {
 		return false, err
 	}
@@ -132,13 +194,16 @@ func (s *Service) HasPermission(ctx context.Context, req Request) (bool, error) 
 		owners = append(owners, PrincipalRef{Kind: PrincipalRole, ID: roleID})
 	}
 
-	grants, err := s.policy.ListGrantsForOwners(ctx, owners, req)
+	grants, err := s.permissions.GrantsForOwners(ctx, owners, req)
 	if err != nil {
 		return false, err
 	}
 
 	allowed := false
 	for _, grant := range grants {
+		if grant.IsExpiredAt(now) {
+			continue
+		}
 		resolvedGrant, err := resolveGrantBindings(grant, bindingByRoleID)
 		if err != nil {
 			return false, err
@@ -164,12 +229,14 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 		return nil, fmt.Errorf("team ID must be positive when provided")
 	}
 
+	now := time.Now().UTC()
+
 	groupIDs, err := s.resolveUserGroupIDs(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	roleAssignments, err := s.policy.ListRoleAssignmentsForUserAndGroups(ctx, userID, groupIDs)
+	roleAssignments, err := s.resolveRoleAssignmentsForUserAndGroups(ctx, userID, groupIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +248,7 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 		bindingByRoleID[assignment.RoleID] = assignment.BindingValues
 	}
 
-	expandedRoleIDs, err := s.policy.ListExpandedRoleIDs(ctx, directRoleIDs)
+	expandedRoleIDs, err := s.permissions.ExpandRoles(ctx, directRoleIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +262,7 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 		owners = append(owners, PrincipalRef{Kind: PrincipalRole, ID: roleID})
 	}
 
-	grants, err := s.policy.ListGrantsForOwners(ctx, owners, Request{UserID: userID, TeamID: teamID})
+	grants, err := s.permissions.GrantsForOwners(ctx, owners, Request{UserID: userID, TeamID: teamID})
 	if err != nil {
 		return nil, err
 	}
@@ -204,6 +271,9 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 	allowed := map[string]EffectivePermission{}
 
 	for _, grant := range grants {
+		if grant.IsExpiredAt(now) {
+			continue
+		}
 		resolvedGrant, err := resolveGrantBindings(grant, bindingByRoleID)
 		if err != nil {
 			return nil, err
@@ -257,7 +327,7 @@ func (s *Service) PrincipalsWithPermission(ctx context.Context, teamID *int64, o
 		return nil, fmt.Errorf("permission name is required")
 	}
 
-	hits, err := s.policy.ListPrincipalsWithGrant(ctx, Request{
+	hits, err := s.permissions.PrincipalsWithGrant(ctx, Request{
 		TeamID: teamID,
 		Object: object,
 		Perm:   perm,
@@ -399,34 +469,45 @@ func resolveScopeToken(scope string, bindingValues map[string]any) (string, erro
 }
 
 func (s *Service) resolveUserGroupIDs(ctx context.Context, userID string) ([]string, error) {
-	candidateGroupIDs, err := s.policy.ListKnownGroupIDs(ctx)
+	groupIDs, err := s.identity.GetUserGroups(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	result := make([]string, 0, len(candidateGroupIDs))
+	result := make([]string, 0, len(groupIDs))
 	seen := map[string]bool{}
-	for _, groupID := range candidateGroupIDs {
+	for _, groupID := range groupIDs {
 		if seen[groupID] {
 			continue
 		}
-		ok, err := s.identity.IsUserInGroup(ctx, userID, groupID)
+		seen[groupID] = true
+		result = append(result, groupID)
+	}
+
+	return result, nil
+}
+
+func (s *Service) resolveRoleAssignmentsForUserAndGroups(ctx context.Context, userID string, groupIDs []string) ([]RoleAssignment, error) {
+	result, err := s.permissions.RoleAssignmentsForPrincipal(ctx, PrincipalRef{Kind: PrincipalUser, ID: userID})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, groupID := range groupIDs {
+		groupAssignments, err := s.permissions.RoleAssignmentsForPrincipal(ctx, PrincipalRef{Kind: PrincipalGroup, ID: groupID})
 		if err != nil {
 			return nil, err
 		}
-		if ok {
-			seen[groupID] = true
-			result = append(result, groupID)
-		}
+		result = append(result, groupAssignments...)
 	}
 
 	return result, nil
 }
 
 func (s *Service) createGrant(ctx context.Context, grant Grant) error {
-	writer, ok := s.policy.(GrantWriter)
+	writer, ok := s.permissions.(GrantWriter)
 	if !ok {
-		return fmt.Errorf("policy store does not support grant writes")
+		return fmt.Errorf("permission store does not support grant writes")
 	}
 
 	if grant.OwnerID == "" {
@@ -443,6 +524,14 @@ func (s *Service) createGrant(ctx context.Context, grant Grant) error {
 }
 
 func cloneStringPointer(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	copyValue := *v
+	return &copyValue
+}
+
+func cloneTimePointer(v *time.Time) *time.Time {
 	if v == nil {
 		return nil
 	}

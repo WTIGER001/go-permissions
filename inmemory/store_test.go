@@ -21,13 +21,13 @@ func TestListPrincipalsWithGrant_DenyOverridesAllow(t *testing.T) {
 		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "r-1", Effect: permissions.EffectAllow, TeamScope: "*", PermissionName: "billing.read"},
 	)
 
-	hits, err := store.ListPrincipalsWithGrant(context.Background(), permissions.Request{
+	hits, err := store.PrincipalsWithGrant(context.Background(), permissions.Request{
 		TeamID: &teamID,
 		Object: "billing",
 		Perm:   "billing.read",
 	})
 	if err != nil {
-		t.Fatalf("ListPrincipalsWithGrant: %v", err)
+		t.Fatalf("PrincipalsWithGrant: %v", err)
 	}
 
 	got := make([]string, 0, len(hits))

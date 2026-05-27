@@ -16,13 +16,12 @@ const (
 )
 
 type PermissionDefinition struct {
-	ID           string
-	Scope        PermissionScope
-	Namespace    string
-	Name         string
-	Description  string
-	AdminAllowed bool
-	Fields       []string
+	ID          string
+	Scope       PermissionScope
+	Namespace   string
+	Name        string
+	Description string
+	Fields      []string
 }
 
 func (d PermissionDefinition) Validate() error {
@@ -143,36 +142,33 @@ func (r *PermissionRegistry) Len() int {
 
 func (p *SystemPermission) Definition() PermissionDefinition {
 	return PermissionDefinition{
-		ID:           p.ID(),
-		Scope:        PermissionScopeSystem,
-		Namespace:    p.Namespace(),
-		Name:         p.Name(),
-		Description:  p.Description(),
-		AdminAllowed: p.AdminAllowed(),
-		Fields:       p.Fields(),
+		ID:          p.ID(),
+		Scope:       PermissionScopeSystem,
+		Namespace:   p.Namespace(),
+		Name:        p.Name(),
+		Description: p.Description(),
+		Fields:      p.Fields(),
 	}
 }
 
 func (p *TeamPermission) Definition() PermissionDefinition {
 	return PermissionDefinition{
-		ID:           p.ID(),
-		Scope:        PermissionScopeTeam,
-		Namespace:    p.Namespace(),
-		Name:         p.Name(),
-		Description:  p.Description(),
-		AdminAllowed: p.AdminAllowed(),
-		Fields:       p.Fields(),
+		ID:          p.ID(),
+		Scope:       PermissionScopeTeam,
+		Namespace:   p.Namespace(),
+		Name:        p.Name(),
+		Description: p.Description(),
+		Fields:      p.Fields(),
 	}
 }
 
 func (p *ObjectPermission) Definition() PermissionDefinition {
 	return PermissionDefinition{
-		ID:           p.ID(),
-		Scope:        PermissionScopeObject,
-		Namespace:    p.Namespace(),
-		Name:         p.Name(),
-		Description:  p.Description(),
-		AdminAllowed: p.AdminAllowed(),
-		Fields:       p.Fields(),
+		ID:          p.ID(),
+		Scope:       PermissionScopeObject,
+		Namespace:   p.Namespace(),
+		Name:        p.Name(),
+		Description: p.Description(),
+		Fields:      p.Fields(),
 	}
 }

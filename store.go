@@ -2,21 +2,20 @@ package permissions
 
 import "context"
 
-type IdentityResolver interface {
+type IdentityProvider interface {
+	GetUserGroups(ctx context.Context, userID string) ([]string, error)
+	GetGroupMembers(ctx context.Context, groupID string) ([]string, error)
 	IsUserInGroup(ctx context.Context, userID, groupID string) (bool, error)
 }
 
-type PolicyStore interface {
-	ListKnownGroupIDs(ctx context.Context) ([]string, error)
-	ListRoleAssignmentsForUserAndGroups(ctx context.Context, userID string, groupIDs []string) ([]RoleAssignment, error)
-	ListExpandedRoleIDs(ctx context.Context, roleIDs []string) ([]string, error)
-	ListGrantsForOwners(ctx context.Context, owners []PrincipalRef, req Request) ([]Grant, error)
-	ListPrincipalsWithGrant(ctx context.Context, req Request) ([]PrincipalHit, error)
-}
-
-type Store interface {
-	IdentityResolver
-	PolicyStore
+type PermissionStore interface {
+	RoleDefinitions(ctx context.Context) ([]Role, error)
+	RoleDefinition(ctx context.Context, roleID string) (Role, error)
+	RoleAssignmentsForPrincipal(ctx context.Context, principal PrincipalRef) ([]RoleAssignment, error)
+	GrantsForPrincipal(ctx context.Context, principal PrincipalRef) ([]Grant, error)
+	GrantsForOwners(ctx context.Context, owners []PrincipalRef, req Request) ([]Grant, error)
+	PrincipalsWithGrant(ctx context.Context, req Request) ([]PrincipalHit, error)
+	ExpandRoles(ctx context.Context, roleIDs []string) ([]string, error)
 }
 
 // GrantWriter is an optional store capability for creating policy grants.

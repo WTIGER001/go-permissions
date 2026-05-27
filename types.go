@@ -1,6 +1,9 @@
 package permissions
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type PrincipalKind string
 
@@ -42,8 +45,20 @@ type Grant struct {
 	TeamScope      string
 	ObjectScope    *string
 	PermissionName string
+	ExpiresAt      *time.Time
 	FieldAllowlist []string
 	VariableSpec   map[string]any
+}
+
+func (g Grant) IsActiveAt(now time.Time) bool {
+	if g.ExpiresAt == nil {
+		return true
+	}
+	return now.Before(*g.ExpiresAt)
+}
+
+func (g Grant) IsExpiredAt(now time.Time) bool {
+	return !g.IsActiveAt(now)
 }
 
 type EffectivePermission struct {
@@ -73,4 +88,12 @@ func (r PrincipalRef) Validate() error {
 	default:
 		return fmt.Errorf("unsupported principal kind: %q", r.Kind)
 	}
+}
+
+type Role struct {
+	ID           string
+	Name         string
+	Description  string
+	VariableSpec map[string]any
+	Permissions  []string
 }

@@ -7,15 +7,15 @@ import (
 
 	"github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
-	"github.com/wtiger001/go-permissions/samples/shared"
 )
 
 func main() {
 	ctx := context.Background()
 	store := inmemory.NewStore()
-	svc := permissions.NewService(store)
+	identity := inmemory.NewIdentityProvider()
+	svc := permissions.NewServiceWithProviders(store, identity)
 
-	perm := permissions.NewTeamPermission("tasks.view", "Tasks", "View Tasks", "Allows viewing tasks for a team.", true).WithChecker(svc)
+	perm := permissions.NewTeamPermission("tasks.view", "Tasks", "View Tasks", "Allows viewing tasks for a team.").WithChecker(svc)
 
 	store.AddGrants(
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "contractor-1", Effect: permissions.EffectAllow, TeamScope: strconv.FormatInt(11, 10), PermissionName: perm.ID()},
@@ -24,6 +24,7 @@ func main() {
 
 	for _, team := range []int64{11, 22, 33, 44} {
 		label := fmt.Sprintf("contractor-1 can view tasks for team %d", team)
-		shared.PrintTeamCheck(ctx, svc, "contractor-1", team, perm.ID(), label)
+		ok := perm.Can(ctx, "contractor-1", team)
+		fmt.Printf("%s: %t\n", label, ok)
 	}
 }

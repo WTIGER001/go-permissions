@@ -2,23 +2,31 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
-	"github.com/wtiger001/go-permissions/samples/shared"
 )
 
 func main() {
 	ctx := context.Background()
 	store := inmemory.NewStore()
-	svc := permissions.NewService(store)
+	identity := inmemory.NewIdentityProvider()
+	svc := permissions.NewServiceWithProviders(store, identity)
 
-	perm := permissions.NewObjectPermission("datasets.view", "Data", "View Dataset", "Allows viewing datasets by region.", true).WithChecker(svc)
+	perm := permissions.NewObjectPermission("datasets.view", "Data", "View Dataset", "Allows viewing datasets by region.").WithChecker(svc)
 
-	shared.Must(svc.AllowUser(ctx, "analyst-global", perm.ID(), nil))
-	shared.Must(svc.DenyUser(ctx, "analyst-global", perm.ID(), shared.StrPtr("region-restricted")))
+	if err := svc.AllowUser(ctx, "analyst-global", perm.ID(), nil); err != nil {
+		panic(err)
+	}
+	restricted := "region-restricted"
+	if err := svc.DenyUser(ctx, "analyst-global", perm.ID(), &restricted); err != nil {
+		panic(err)
+	}
 
-	shared.PrintObjectCheck(ctx, svc, "analyst-global", "region-us", perm.ID(), "analyst-global can view region-us")
-	shared.PrintObjectCheck(ctx, svc, "analyst-global", "region-eu", perm.ID(), "analyst-global can view region-eu")
-	shared.PrintObjectCheck(ctx, svc, "analyst-global", "region-restricted", perm.ID(), "analyst-global can view region-restricted")
+	for _, objectID := range []string{"region-us", "region-eu", "region-restricted"} {
+		ok := perm.Can(ctx, "analyst-global", objectID)
+		label := fmt.Sprintf("analyst-global can view %s", objectID)
+		fmt.Printf("%s: %t\n", label, ok)
+	}
 }

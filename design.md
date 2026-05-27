@@ -139,6 +139,7 @@ create table permission_grants (
 	team_scope text not null,
 	object_scope text null,
 	permission_name text not null,
+	expires_at timestamptz null,
 	field_allowlist text[] null,
 	variable_spec jsonb not null default '{}'::jsonb,
 	created_at timestamptz not null default now(),
@@ -151,6 +152,7 @@ create table permission_grants (
 - `owner_kind` and `owner_id` let a single grant table serve users, groups, and roles.
 - `team_scope` stores either a concrete team id, `*`, or a template token for role definitions.
 - `object_scope` is nullable so global permission names are cheap.
+- `expires_at` supports temporary grants without relying on implicit admin bypasses.
 - `variable_spec` is the template metadata for role definitions, not runtime authorization data.
 - `field_allowlist` is reserved for future field-level permissions and can stay null for now.
 
@@ -195,11 +197,32 @@ For a request with `team_id`, `object`, and `permission_name`:
 
 Matching rules:
 
+- Grants with `expires_at <= now()` are ignored.
 - `*` in `team_scope` matches any concrete team.
 - `*` in `object_scope` matches any object.
 - `object_scope = null` means the permission is not object-specific.
 - Exact matches are more specific than wildcard matches.
 - Denies always override allows.
+
+### Service Write Helpers For Expiring Grants
+
+Default (no expiry):
+
+1. `AllowUser`
+2. `DenyUser`
+3. `AllowRole`
+
+With explicit expiration timestamp:
+
+1. `AllowUserUntil`
+2. `DenyUserUntil`
+3. `AllowRoleUntil`
+
+With TTL duration:
+
+1. `AllowUserFor`
+2. `DenyUserFor`
+3. `AllowRoleFor`
 
 ## Why Not Store Everything In One String
 
@@ -234,8 +257,8 @@ const (
 )
 
 type Request struct {
-	UserID int64
-	TeamID int64
+	UserID string
+	TeamID *int64
 	Object string
 	Perm   string
 }
@@ -243,33 +266,43 @@ type Request struct {
 type Grant struct {
 	ID             int64
 	OwnerKind      PrincipalKind
-	OwnerID        int64
+	OwnerID        string
 	Effect         Effect
 	TeamScope      string
 	ObjectScope    *string
 	PermissionName string
+	ExpiresAt      *time.Time
 	FieldAllowlist []string
 }
 
 type EffectivePermission struct {
-	TeamID         string
-	Object         *string
+	TeamScope      string
+	ObjectScope    *string
 	PermissionName string
-	Source         string
+	Source         PrincipalRef
 	Effect         Effect
 	Fields         []string
 }
 
-type Store interface {
-	ListUserGroupIDs(ctx context.Context, userID int64) ([]int64, error)
-	ListRoleIDsForUserAndGroups(ctx context.Context, userID int64, groupIDs []int64) ([]RoleAssignmentRow, error)
-	ListExpandedRoleIDs(ctx context.Context, roleIDs []int64) ([]int64, error)
-	ListGrantsForOwners(ctx context.Context, ownerKinds []PrincipalKind, ownerIDs []int64) ([]GrantRow, error)
-	ListPrincipalsWithGrant(ctx context.Context, req Request) ([]PrincipalHit, error)
+type IdentityProvider interface {
+	GetUserGroups(ctx context.Context, userID string) ([]string, error)
+	GetGroupMembers(ctx context.Context, groupID string) ([]string, error)
+	IsUserInGroup(ctx context.Context, userID, groupID string) (bool, error)
+}
+
+type PermissionStore interface {
+	RoleDefinitions(ctx context.Context) ([]Role, error)
+	RoleDefinition(ctx context.Context, roleID string) (Role, error)
+	RoleAssignmentsForPrincipal(ctx context.Context, principal PrincipalRef) ([]RoleAssignment, error)
+	ExpandRoles(ctx context.Context, roleIDs []string) ([]string, error)
+	GrantsForPrincipal(ctx context.Context, principal PrincipalRef) ([]Grant, error)
+	GrantsForOwners(ctx context.Context, owners []PrincipalRef, req Request) ([]Grant, error)
+	PrincipalsWithGrant(ctx context.Context, req Request) ([]PrincipalHit, error)
 }
 
 type AuthorizationService struct {
-	store Store
+	identity    IdentityProvider
+	permissions PermissionStore
 }
 ```
 
@@ -280,8 +313,8 @@ The service should expose these methods:
 ```go
 type Service interface {
 	HasPermission(ctx context.Context, req Request) (bool, error)
-	PrincipalsWithPermission(ctx context.Context, teamID int64, object, perm string) ([]PrincipalHit, error)
-	EffectivePermissions(ctx context.Context, userID int64, teamID int64) ([]EffectivePermission, error)
+	PrincipalsWithPermission(ctx context.Context, teamID *int64, object, perm string) ([]PrincipalHit, error)
+	EffectivePermissions(ctx context.Context, userID string, teamID *int64) ([]EffectivePermission, error)
 }
 ```
 
@@ -291,33 +324,44 @@ This method collects all candidate principals, expands group and role inheritanc
 
 ```go
 func (s *AuthorizationService) HasPermission(ctx context.Context, req Request) (bool, error) {
-	groupIDs, err := s.store.ListUserGroupIDs(ctx, req.UserID)
+	groupIDs, err := s.identity.GetUserGroups(ctx, req.UserID)
 	if err != nil {
 		return false, err
 	}
 
-	roleRows, err := s.store.ListRoleIDsForUserAndGroups(ctx, req.UserID, groupIDs)
+	directRoleIDs := make([]string, 0)
+	for _, groupID := range groupIDs {
+		rows, err := s.permissions.RoleAssignmentsForPrincipal(ctx, PrincipalRef{Kind: PrincipalGroup, ID: groupID})
+		if err != nil {
+			return false, err
+		}
+		for _, row := range rows {
+			directRoleIDs = append(directRoleIDs, row.RoleID)
+		}
+	}
+	userRows, err := s.permissions.RoleAssignmentsForPrincipal(ctx, PrincipalRef{Kind: PrincipalUser, ID: req.UserID})
 	if err != nil {
 		return false, err
 	}
-
-	directRoleIDs := make([]int64, 0, len(roleRows))
-	for _, row := range roleRows {
+	for _, row := range userRows {
 		directRoleIDs = append(directRoleIDs, row.RoleID)
 	}
 
-	expandedRoleIDs, err := s.store.ListExpandedRoleIDs(ctx, directRoleIDs)
+	expandedRoleIDs, err := s.permissions.ExpandRoles(ctx, directRoleIDs)
 	if err != nil {
 		return false, err
 	}
 
-	ownerKinds := []PrincipalKind{PrincipalUser, PrincipalGroup, PrincipalRole}
-	ownerIDs := make([]int64, 0, 1+len(groupIDs)+len(expandedRoleIDs))
-	ownerIDs = append(ownerIDs, req.UserID)
-	ownerIDs = append(ownerIDs, groupIDs...)
-	ownerIDs = append(ownerIDs, expandedRoleIDs...)
+	owners := make([]PrincipalRef, 0, 1+len(groupIDs)+len(expandedRoleIDs))
+	owners = append(owners, PrincipalRef{Kind: PrincipalUser, ID: req.UserID})
+	for _, groupID := range groupIDs {
+		owners = append(owners, PrincipalRef{Kind: PrincipalGroup, ID: groupID})
+	}
+	for _, roleID := range expandedRoleIDs {
+		owners = append(owners, PrincipalRef{Kind: PrincipalRole, ID: roleID})
+	}
 
-	grants, err := s.store.ListGrantsForOwners(ctx, ownerKinds, ownerIDs)
+	grants, err := s.permissions.GrantsForOwners(ctx, owners, req)
 	if err != nil {
 		return false, err
 	}
@@ -337,12 +381,16 @@ func (s *AuthorizationService) HasPermission(ctx context.Context, req Request) (
 	return allowed, nil
 }
 
-func grantMatchesRequest(grant GrantRow, req Request) bool {
+func grantMatchesRequest(grant Grant, req Request) bool {
 	if grant.PermissionName != req.Perm {
 		return false
 	}
 
-	if grant.TeamScope != "*" && grant.TeamScope != strconv.FormatInt(req.TeamID, 10) {
+	if req.TeamID != nil {
+		if grant.TeamScope != "*" && grant.TeamScope != strconv.FormatInt(*req.TeamID, 10) {
+			return false
+		}
+	} else if grant.TeamScope != "*" {
 		return false
 	}
 
@@ -361,12 +409,12 @@ This query is best implemented as a reverse search over principals and their eff
 ```go
 type PrincipalHit struct {
 	Kind  PrincipalKind
-	ID    int64
+	ID    string
 	Scope string
 }
 
-func (s *AuthorizationService) PrincipalsWithPermission(ctx context.Context, teamID int64, object, perm string) ([]PrincipalHit, error) {
-	return s.store.ListPrincipalsWithGrant(ctx, Request{
+func (s *AuthorizationService) PrincipalsWithPermission(ctx context.Context, teamID *int64, object, perm string) ([]PrincipalHit, error) {
+	return s.permissions.PrincipalsWithGrant(ctx, Request{
 		TeamID: teamID,
 		Object: object,
 		Perm:   perm,
@@ -385,34 +433,45 @@ The repository query should:
 This method returns the permission set for one user in one team, deduplicated by source and with deny removed from the final allow list.
 
 ```go
-func (s *AuthorizationService) EffectivePermissions(ctx context.Context, userID int64, teamID int64) ([]EffectivePermission, error) {
-	groupIDs, err := s.store.ListUserGroupIDs(ctx, userID)
+func (s *AuthorizationService) EffectivePermissions(ctx context.Context, userID string, teamID *int64) ([]EffectivePermission, error) {
+	groupIDs, err := s.identity.GetUserGroups(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	roleRows, err := s.store.ListRoleIDsForUserAndGroups(ctx, userID, groupIDs)
+	directRoleIDs := make([]string, 0)
+	for _, groupID := range groupIDs {
+		rows, err := s.permissions.RoleAssignmentsForPrincipal(ctx, PrincipalRef{Kind: PrincipalGroup, ID: groupID})
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			directRoleIDs = append(directRoleIDs, row.RoleID)
+		}
+	}
+	userRows, err := s.permissions.RoleAssignmentsForPrincipal(ctx, PrincipalRef{Kind: PrincipalUser, ID: userID})
 	if err != nil {
 		return nil, err
 	}
-
-	directRoleIDs := make([]int64, 0, len(roleRows))
-	for _, row := range roleRows {
+	for _, row := range userRows {
 		directRoleIDs = append(directRoleIDs, row.RoleID)
 	}
 
-	expandedRoleIDs, err := s.store.ListExpandedRoleIDs(ctx, directRoleIDs)
+	expandedRoleIDs, err := s.permissions.ExpandRoles(ctx, directRoleIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	ownerKinds := []PrincipalKind{PrincipalUser, PrincipalGroup, PrincipalRole}
-	ownerIDs := make([]int64, 0, 1+len(groupIDs)+len(expandedRoleIDs))
-	ownerIDs = append(ownerIDs, userID)
-	ownerIDs = append(ownerIDs, groupIDs...)
-	ownerIDs = append(ownerIDs, expandedRoleIDs...)
+	owners := make([]PrincipalRef, 0, 1+len(groupIDs)+len(expandedRoleIDs))
+	owners = append(owners, PrincipalRef{Kind: PrincipalUser, ID: userID})
+	for _, groupID := range groupIDs {
+		owners = append(owners, PrincipalRef{Kind: PrincipalGroup, ID: groupID})
+	}
+	for _, roleID := range expandedRoleIDs {
+		owners = append(owners, PrincipalRef{Kind: PrincipalRole, ID: roleID})
+	}
 
-	grants, err := s.store.ListGrantsForOwners(ctx, ownerKinds, ownerIDs)
+	grants, err := s.permissions.GrantsForOwners(ctx, owners, Request{UserID: userID, TeamID: teamID})
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +481,10 @@ func (s *AuthorizationService) EffectivePermissions(ctx context.Context, userID 
 	result := make([]EffectivePermission, 0, len(grants))
 
 	for _, grant := range grants {
-		if grant.TeamScope != "*" && grant.TeamScope != strconv.FormatInt(teamID, 10) {
+		if teamID != nil && grant.TeamScope != "*" && grant.TeamScope != strconv.FormatInt(*teamID, 10) {
+			continue
+		}
+		if teamID == nil && grant.TeamScope != "*" {
 			continue
 		}
 
@@ -439,10 +501,10 @@ func (s *AuthorizationService) EffectivePermissions(ctx context.Context, userID 
 
 		seen[key] = true
 		result = append(result, EffectivePermission{
-			TeamID:         grant.TeamScope,
-			Object:         grant.ObjectScope,
+			TeamScope:      grant.TeamScope,
+			ObjectScope:    grant.ObjectScope,
 			PermissionName: grant.PermissionName,
-			Source:         fmt.Sprintf("%s:%d", grant.OwnerKind, grant.OwnerID),
+			Source:         PrincipalRef{Kind: grant.OwnerKind, ID: grant.OwnerID},
 			Effect:         grant.Effect,
 			Fields:         append([]string(nil), grant.FieldAllowlist...),
 		})
@@ -780,7 +842,7 @@ func (s *AuthorizationService) resolveConditionalRoles(
 }
 ```
 
-Then merge `allowedRoleIDs` into your normal role set before calling `ListExpandedRoleIDs`.
+Then merge `allowedRoleIDs` into your normal role set before calling `ExpandRoles`.
 
 ### Performance Guidance
 
@@ -1075,10 +1137,6 @@ Recommended semantics:
 - `Any` can be used over many hierarchical checks.
 
 ### Options
-
-#### WithoutAdmin()
-
-Disables admin override for this permission.
 
 #### WithFields([]string)
 

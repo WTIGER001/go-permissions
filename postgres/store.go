@@ -14,8 +14,43 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+var _ permissions.PermissionStore = (*Store)(nil)
+
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
+}
+
+func (s *Store) GetUserGroups(ctx context.Context, userID string) ([]string, error) {
+	return s.ListUserGroupIDs(ctx, userID)
+}
+
+func (s *Store) GetGroupMembers(ctx context.Context, groupID string) ([]string, error) {
+	const query = `
+select distinct gm.user_id
+from group_members gm
+join group_closure gc on gc.descendant_group_id = gm.group_id
+where gc.ancestor_group_id = $1
+`
+
+	rows, err := s.pool.Query(ctx, query, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("query group members: %w", err)
+	}
+	defer rows.Close()
+
+	userIDs := make([]string, 0, 8)
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return nil, fmt.Errorf("scan group member user ID: %w", err)
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate group members: %w", err)
+	}
+
+	return userIDs, nil
 }
 
 func (s *Store) ListKnownGroupIDs(ctx context.Context) ([]string, error) {
@@ -156,11 +191,13 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 			team_scope text not null,
 			object_scope text null,
 			permission_name text not null,
+			expires_at timestamptz null,
 			field_allowlist text[] null,
 			variable_spec jsonb not null default '{}'::jsonb,
 			created_at timestamptz not null default now(),
 			updated_at timestamptz not null default now()
 		);`,
+		`alter table permission_grants add column if not exists expires_at timestamptz null;`,
 		`create index if not exists idx_group_members_user on group_members (user_id, group_id);`,
 		`create index if not exists idx_group_closure_descendant on group_closure (descendant_group_id, ancestor_group_id);`,
 		`create index if not exists idx_role_assignments_principal on principal_roles (principal_kind, principal_id, role_id);`,
@@ -252,6 +289,47 @@ where (pr.principal_kind = 'user' and pr.principal_id = $1)
 	return assignments, nil
 }
 
+func (s *Store) RoleAssignmentsForPrincipal(ctx context.Context, principal permissions.PrincipalRef) ([]permissions.RoleAssignment, error) {
+	if err := principal.Validate(); err != nil {
+		return nil, err
+	}
+
+	const query = `
+select pr.role_id, pr.binding_values
+from principal_roles pr
+where pr.principal_kind = $1 and pr.principal_id = $2
+`
+
+	rows, err := s.pool.Query(ctx, query, string(principal.Kind), principal.ID)
+	if err != nil {
+		return nil, fmt.Errorf("query role assignments for principal: %w", err)
+	}
+	defer rows.Close()
+
+	assignments := make([]permissions.RoleAssignment, 0, 8)
+	for rows.Next() {
+		var roleID string
+		var bindingRaw []byte
+		if err := rows.Scan(&roleID, &bindingRaw); err != nil {
+			return nil, fmt.Errorf("scan role assignment for principal: %w", err)
+		}
+
+		bindingValues := map[string]any{}
+		if len(bindingRaw) > 0 {
+			if err := json.Unmarshal(bindingRaw, &bindingValues); err != nil {
+				return nil, fmt.Errorf("unmarshal binding values for principal assignment: %w", err)
+			}
+		}
+
+		assignments = append(assignments, permissions.RoleAssignment{RoleID: roleID, BindingValues: bindingValues})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate role assignments for principal: %w", err)
+	}
+
+	return assignments, nil
+}
+
 func (s *Store) ListExpandedRoleIDs(ctx context.Context, roleIDs []string) ([]string, error) {
 	if len(roleIDs) == 0 {
 		return nil, nil
@@ -282,6 +360,10 @@ where rc.ancestor_role_id = any($1::text[])
 	}
 
 	return expandedRoleIDs, nil
+}
+
+func (s *Store) ExpandRoles(ctx context.Context, roleIDs []string) ([]string, error) {
+	return s.ListExpandedRoleIDs(ctx, roleIDs)
 }
 
 func (s *Store) ListGrantsForOwners(ctx context.Context, owners []permissions.PrincipalRef, req permissions.Request) ([]permissions.Grant, error) {
@@ -318,11 +400,13 @@ select
 	pg.team_scope,
 	pg.object_scope,
 	pg.permission_name,
+	pg.expires_at,
 	pg.field_allowlist,
 	pg.variable_spec
 from permission_grants pg
 join owner_refs r on r.owner_kind = pg.owner_kind and r.owner_id = pg.owner_id
 where ($3::text = '' or pg.permission_name = $3)
+	and (pg.expires_at is null or pg.expires_at > now())
 	and (
 		($4::text is null and pg.team_scope = '*')
 		or
@@ -352,6 +436,7 @@ where ($3::text = '' or pg.permission_name = $3)
 			&grant.TeamScope,
 			&grant.ObjectScope,
 			&grant.PermissionName,
+			&grant.ExpiresAt,
 			&grant.FieldAllowlist,
 			&variableSpecRaw,
 		); err != nil {
@@ -378,6 +463,14 @@ where ($3::text = '' or pg.permission_name = $3)
 	return grants, nil
 }
 
+func (s *Store) GrantsForOwners(ctx context.Context, owners []permissions.PrincipalRef, req permissions.Request) ([]permissions.Grant, error) {
+	return s.ListGrantsForOwners(ctx, owners, req)
+}
+
+func (s *Store) GrantsForPrincipal(ctx context.Context, principal permissions.PrincipalRef) ([]permissions.Grant, error) {
+	return s.ListGrantsForOwners(ctx, []permissions.PrincipalRef{principal}, permissions.Request{})
+}
+
 func (s *Store) ListPrincipalsWithGrant(ctx context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
 	if req.Perm == "" {
 		return nil, fmt.Errorf("permission name is required")
@@ -399,6 +492,7 @@ select distinct
 from permission_grants pg
 where pg.effect = 'allow'
 	and pg.permission_name = $1
+	and (pg.expires_at is null or pg.expires_at > now())
 	and (
 		($2::text is null and pg.team_scope = '*')
 		or
@@ -412,6 +506,7 @@ where pg.effect = 'allow'
 			and pd.owner_id = pg.owner_id
 			and pd.effect = 'deny'
 			and pd.permission_name = $1
+			and (pd.expires_at is null or pd.expires_at > now())
 			and (
 				($2::text is null and pd.team_scope = '*')
 				or
@@ -444,6 +539,61 @@ where pg.effect = 'allow'
 	return hits, nil
 }
 
+func (s *Store) PrincipalsWithGrant(ctx context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
+	return s.ListPrincipalsWithGrant(ctx, req)
+}
+
+func (s *Store) RoleDefinitions(ctx context.Context) ([]permissions.Role, error) {
+	const query = `
+select id, code, coalesce(description, '')
+from roles
+order by id
+`
+
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query role definitions: %w", err)
+	}
+	defer rows.Close()
+
+	roles := make([]permissions.Role, 0, 16)
+	for rows.Next() {
+		var role permissions.Role
+		if err := rows.Scan(&role.ID, &role.Name, &role.Description); err != nil {
+			return nil, fmt.Errorf("scan role definition: %w", err)
+		}
+		role.VariableSpec = map[string]any{}
+		role.Permissions = []string{}
+		roles = append(roles, role)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate role definitions: %w", err)
+	}
+
+	return roles, nil
+}
+
+func (s *Store) RoleDefinition(ctx context.Context, roleID string) (permissions.Role, error) {
+	if roleID == "" {
+		return permissions.Role{}, fmt.Errorf("role ID is required")
+	}
+
+	const query = `
+select id, code, coalesce(description, '')
+from roles
+where id = $1
+`
+
+	var role permissions.Role
+	if err := s.pool.QueryRow(ctx, query, roleID).Scan(&role.ID, &role.Name, &role.Description); err != nil {
+		return permissions.Role{}, fmt.Errorf("query role definition: %w", err)
+	}
+
+	role.VariableSpec = map[string]any{}
+	role.Permissions = []string{}
+	return role, nil
+}
+
 func (s *Store) CreateGrant(ctx context.Context, grant permissions.Grant) error {
 	if grant.OwnerID == "" {
 		return fmt.Errorf("owner ID is required")
@@ -473,9 +623,10 @@ insert into permission_grants (
 	team_scope,
 	object_scope,
 	permission_name,
+	expires_at,
 	field_allowlist,
 	variable_spec
-) values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+) values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
 `
 
 	if _, err := s.pool.Exec(
@@ -487,6 +638,7 @@ insert into permission_grants (
 		grant.TeamScope,
 		grant.ObjectScope,
 		grant.PermissionName,
+		grant.ExpiresAt,
 		grant.FieldAllowlist,
 		variableSpecRaw,
 	); err != nil {

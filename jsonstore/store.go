@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/wtiger001/go-permissions"
 )
@@ -25,6 +26,8 @@ type Store struct {
 	mu   sync.RWMutex
 	data Data
 }
+
+var _ permissions.PermissionStore = (*Store)(nil)
 
 func NewStore(path string) (*Store, error) {
 	if path == "" {
@@ -195,6 +198,30 @@ func (s *Store) IsUserInGroup(_ context.Context, userID, groupID string) (bool, 
 	return false, nil
 }
 
+func (s *Store) GetUserGroups(_ context.Context, userID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return append([]string(nil), s.data.UserGroups[userID]...), nil
+}
+
+func (s *Store) GetGroupMembers(_ context.Context, groupID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	members := make([]string, 0)
+	for userID, groups := range s.data.UserGroups {
+		for _, g := range groups {
+			if g == groupID {
+				members = append(members, userID)
+				break
+			}
+		}
+	}
+
+	return members, nil
+}
+
 func (s *Store) ListRoleAssignmentsForUserAndGroups(_ context.Context, userID string, groupIDs []string) ([]permissions.RoleAssignment, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -206,6 +233,20 @@ func (s *Store) ListRoleAssignmentsForUserAndGroups(_ context.Context, userID st
 	}
 
 	return result, nil
+}
+
+func (s *Store) RoleAssignmentsForPrincipal(_ context.Context, principal permissions.PrincipalRef) ([]permissions.RoleAssignment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	switch principal.Kind {
+	case permissions.PrincipalUser:
+		return cloneRoleAssignments(s.data.UserRoleAssignments[principal.ID]), nil
+	case permissions.PrincipalGroup:
+		return cloneRoleAssignments(s.data.GroupRoleAssignments[principal.ID]), nil
+	default:
+		return nil, nil
+	}
 }
 
 func (s *Store) ListExpandedRoleIDs(_ context.Context, roleIDs []string) ([]string, error) {
@@ -233,9 +274,15 @@ func (s *Store) ListExpandedRoleIDs(_ context.Context, roleIDs []string) ([]stri
 	return expanded, nil
 }
 
+func (s *Store) ExpandRoles(ctx context.Context, roleIDs []string) ([]string, error) {
+	return s.ListExpandedRoleIDs(ctx, roleIDs)
+}
+
 func (s *Store) ListGrantsForOwners(_ context.Context, owners []permissions.PrincipalRef, req permissions.Request) ([]permissions.Grant, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	now := time.Now().UTC()
 
 	ownerSet := map[string]bool{}
 	for _, owner := range owners {
@@ -250,6 +297,9 @@ func (s *Store) ListGrantsForOwners(_ context.Context, owners []permissions.Prin
 
 	result := make([]permissions.Grant, 0, len(s.data.Grants))
 	for _, grant := range s.data.Grants {
+		if !grant.IsActiveAt(now) {
+			continue
+		}
 		if !ownerSet[string(grant.OwnerKind)+":"+grant.OwnerID] {
 			continue
 		}
@@ -275,9 +325,19 @@ func (s *Store) ListGrantsForOwners(_ context.Context, owners []permissions.Prin
 	return result, nil
 }
 
+func (s *Store) GrantsForOwners(ctx context.Context, owners []permissions.PrincipalRef, req permissions.Request) ([]permissions.Grant, error) {
+	return s.ListGrantsForOwners(ctx, owners, req)
+}
+
+func (s *Store) GrantsForPrincipal(ctx context.Context, principal permissions.PrincipalRef) ([]permissions.Grant, error) {
+	return s.ListGrantsForOwners(ctx, []permissions.PrincipalRef{principal}, permissions.Request{})
+}
+
 func (s *Store) ListPrincipalsWithGrant(_ context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	now := time.Now().UTC()
 
 	hasTeam := req.TeamID != nil
 	team := ""
@@ -289,6 +349,9 @@ func (s *Store) ListPrincipalsWithGrant(_ context.Context, req permissions.Reque
 	deniedPrincipal := map[string]bool{}
 
 	for _, grant := range s.data.Grants {
+		if !grant.IsActiveAt(now) {
+			continue
+		}
 		if req.Perm != "" && grant.PermissionName != req.Perm {
 			continue
 		}
@@ -335,6 +398,22 @@ func (s *Store) ListPrincipalsWithGrant(_ context.Context, req permissions.Reque
 	}
 
 	return result, nil
+}
+
+func (s *Store) PrincipalsWithGrant(ctx context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
+	return s.ListPrincipalsWithGrant(ctx, req)
+}
+
+func (s *Store) RoleDefinitions(_ context.Context) ([]permissions.Role, error) {
+	return []permissions.Role{}, nil
+}
+
+func (s *Store) RoleDefinition(_ context.Context, roleID string) (permissions.Role, error) {
+	if roleID == "" {
+		return permissions.Role{}, fmt.Errorf("role ID is required")
+	}
+
+	return permissions.Role{ID: roleID, Name: roleID, VariableSpec: map[string]any{}, Permissions: []string{}}, nil
 }
 
 func emptyData() Data {
@@ -416,6 +495,7 @@ func cloneRoleAssignments(assignments []permissions.RoleAssignment) []permission
 func cloneGrant(grant permissions.Grant) permissions.Grant {
 	copyGrant := grant
 	copyGrant.ObjectScope = cloneStringPtr(grant.ObjectScope)
+	copyGrant.ExpiresAt = cloneTimePtr(grant.ExpiresAt)
 	copyGrant.FieldAllowlist = append([]string(nil), grant.FieldAllowlist...)
 	copyGrant.VariableSpec = map[string]any{}
 	for k, v := range grant.VariableSpec {
@@ -425,6 +505,14 @@ func cloneGrant(grant permissions.Grant) permissions.Grant {
 }
 
 func cloneStringPtr(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	copyV := *v
+	return &copyV
+}
+
+func cloneTimePtr(v *time.Time) *time.Time {
 	if v == nil {
 		return nil
 	}

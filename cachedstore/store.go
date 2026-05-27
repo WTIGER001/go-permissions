@@ -16,16 +16,18 @@ const DefaultTTL = time.Minute
 // Store wraps another permissions store and memoizes read operations for a TTL.
 // Write operations are delegated and invalidate the cache.
 type Store struct {
-	base  permissions.Store
+	base  permissions.PermissionStore
 	cache *cache.Cache
 	ttl   time.Duration
 }
 
-func NewStore(base permissions.Store) *Store {
+var _ permissions.PermissionStore = (*Store)(nil)
+
+func NewStore(base permissions.PermissionStore) *Store {
 	return NewStoreWithTTL(base, DefaultTTL)
 }
 
-func NewStoreWithTTL(base permissions.Store, ttl time.Duration) *Store {
+func NewStoreWithTTL(base permissions.PermissionStore, ttl time.Duration) *Store {
 	if base == nil {
 		panic("base store is required")
 	}
@@ -48,48 +50,49 @@ func (s *Store) InvalidateAll() {
 	s.cache.Flush()
 }
 
-func (s *Store) IsUserInGroup(ctx context.Context, userID, groupID string) (bool, error) {
-	key := makeKey("is-user-in-group", map[string]any{"user": userID, "group": groupID})
+func (s *Store) RoleDefinitions(ctx context.Context) ([]permissions.Role, error) {
+	key := "role-definitions"
 	if cachedValue, ok := s.cache.Get(key); ok {
-		if v, castOK := cachedValue.(bool); castOK {
+		if v, castOK := cachedValue.([]permissions.Role); castOK {
+			cloned := append([]permissions.Role(nil), v...)
+			return cloned, nil
+		}
+	}
+
+	value, err := s.base.RoleDefinitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cloned := append([]permissions.Role(nil), value...)
+	setWithTTL(s.cache, key, cloned, s.ttl)
+	return append([]permissions.Role(nil), cloned...), nil
+}
+
+func (s *Store) RoleDefinition(ctx context.Context, roleID string) (permissions.Role, error) {
+	key := makeKey("role-definition", map[string]any{"role_id": roleID})
+	if cachedValue, ok := s.cache.Get(key); ok {
+		if v, castOK := cachedValue.(permissions.Role); castOK {
 			return v, nil
 		}
 	}
 
-	value, err := s.base.IsUserInGroup(ctx, userID, groupID)
+	value, err := s.base.RoleDefinition(ctx, roleID)
 	if err != nil {
-		return false, err
+		return permissions.Role{}, err
 	}
 	setWithTTL(s.cache, key, value, s.ttl)
 	return value, nil
 }
 
-func (s *Store) ListKnownGroupIDs(ctx context.Context) ([]string, error) {
-	key := "list-known-group-ids"
-	if cachedValue, ok := s.cache.Get(key); ok {
-		if v, castOK := cachedValue.([]string); castOK {
-			return cloneStrings(v), nil
-		}
-	}
-
-	value, err := s.base.ListKnownGroupIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cloned := cloneStrings(value)
-	setWithTTL(s.cache, key, cloned, s.ttl)
-	return cloneStrings(cloned), nil
-}
-
-func (s *Store) ListRoleAssignmentsForUserAndGroups(ctx context.Context, userID string, groupIDs []string) ([]permissions.RoleAssignment, error) {
-	key := makeKey("list-role-assignments", map[string]any{"user": userID, "groups": groupIDs})
+func (s *Store) RoleAssignmentsForPrincipal(ctx context.Context, principal permissions.PrincipalRef) ([]permissions.RoleAssignment, error) {
+	key := makeKey("role-assignments-for-principal", map[string]any{"principal": principal})
 	if cachedValue, ok := s.cache.Get(key); ok {
 		if v, castOK := cachedValue.([]permissions.RoleAssignment); castOK {
 			return cloneRoleAssignments(v), nil
 		}
 	}
 
-	value, err := s.base.ListRoleAssignmentsForUserAndGroups(ctx, userID, cloneStrings(groupIDs))
+	value, err := s.base.RoleAssignmentsForPrincipal(ctx, principal)
 	if err != nil {
 		return nil, err
 	}
@@ -98,32 +101,15 @@ func (s *Store) ListRoleAssignmentsForUserAndGroups(ctx context.Context, userID 
 	return cloneRoleAssignments(cloned), nil
 }
 
-func (s *Store) ListExpandedRoleIDs(ctx context.Context, roleIDs []string) ([]string, error) {
-	key := makeKey("list-expanded-role-ids", map[string]any{"roles": roleIDs})
-	if cachedValue, ok := s.cache.Get(key); ok {
-		if v, castOK := cachedValue.([]string); castOK {
-			return cloneStrings(v), nil
-		}
-	}
-
-	value, err := s.base.ListExpandedRoleIDs(ctx, cloneStrings(roleIDs))
-	if err != nil {
-		return nil, err
-	}
-	cloned := cloneStrings(value)
-	setWithTTL(s.cache, key, cloned, s.ttl)
-	return cloneStrings(cloned), nil
-}
-
-func (s *Store) ListGrantsForOwners(ctx context.Context, owners []permissions.PrincipalRef, req permissions.Request) ([]permissions.Grant, error) {
-	key := makeKey("list-grants", map[string]any{"owners": owners, "request": req})
+func (s *Store) GrantsForPrincipal(ctx context.Context, principal permissions.PrincipalRef) ([]permissions.Grant, error) {
+	key := makeKey("grants-for-principal", map[string]any{"principal": principal})
 	if cachedValue, ok := s.cache.Get(key); ok {
 		if v, castOK := cachedValue.([]permissions.Grant); castOK {
 			return cloneGrants(v), nil
 		}
 	}
 
-	value, err := s.base.ListGrantsForOwners(ctx, clonePrincipalRefs(owners), req)
+	value, err := s.base.GrantsForPrincipal(ctx, principal)
 	if err != nil {
 		return nil, err
 	}
@@ -132,15 +118,49 @@ func (s *Store) ListGrantsForOwners(ctx context.Context, owners []permissions.Pr
 	return cloneGrants(cloned), nil
 }
 
-func (s *Store) ListPrincipalsWithGrant(ctx context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
-	key := makeKey("list-principals-with-grant", map[string]any{"request": req})
+func (s *Store) ExpandRoles(ctx context.Context, roleIDs []string) ([]string, error) {
+	key := makeKey("expand-roles", map[string]any{"roles": roleIDs})
+	if cachedValue, ok := s.cache.Get(key); ok {
+		if v, castOK := cachedValue.([]string); castOK {
+			return cloneStrings(v), nil
+		}
+	}
+
+	value, err := s.base.ExpandRoles(ctx, cloneStrings(roleIDs))
+	if err != nil {
+		return nil, err
+	}
+	cloned := cloneStrings(value)
+	setWithTTL(s.cache, key, cloned, s.ttl)
+	return cloneStrings(cloned), nil
+}
+
+func (s *Store) GrantsForOwners(ctx context.Context, owners []permissions.PrincipalRef, req permissions.Request) ([]permissions.Grant, error) {
+	key := makeKey("grants-for-owners", map[string]any{"owners": owners, "request": req})
+	if cachedValue, ok := s.cache.Get(key); ok {
+		if v, castOK := cachedValue.([]permissions.Grant); castOK {
+			return cloneGrants(v), nil
+		}
+	}
+
+	value, err := s.base.GrantsForOwners(ctx, clonePrincipalRefs(owners), req)
+	if err != nil {
+		return nil, err
+	}
+	cloned := cloneGrants(value)
+	setWithTTL(s.cache, key, cloned, s.ttl)
+	return cloneGrants(cloned), nil
+}
+
+func (s *Store) PrincipalsWithGrant(ctx context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
+	key := makeKey("principals-with-grant", map[string]any{"request": req})
 	if cachedValue, ok := s.cache.Get(key); ok {
 		if v, castOK := cachedValue.([]permissions.PrincipalHit); castOK {
 			return clonePrincipalHits(v), nil
 		}
 	}
 
-	value, err := s.base.ListPrincipalsWithGrant(ctx, req)
+	value, err := s.base.PrincipalsWithGrant(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -221,6 +241,7 @@ func cloneGrants(values []permissions.Grant) []permissions.Grant {
 	for _, grant := range values {
 		copied := grant
 		copied.ObjectScope = cloneStringPtr(grant.ObjectScope)
+		copied.ExpiresAt = cloneTimePtr(grant.ExpiresAt)
 		copied.FieldAllowlist = append([]string(nil), grant.FieldAllowlist...)
 		copied.VariableSpec = cloneMap(grant.VariableSpec)
 		result = append(result, copied)
@@ -242,6 +263,14 @@ func clonePrincipalHits(values []permissions.PrincipalHit) []permissions.Princip
 }
 
 func cloneStringPtr(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	copied := *v
+	return &copied
+}
+
+func cloneTimePtr(v *time.Time) *time.Time {
 	if v == nil {
 		return nil
 	}

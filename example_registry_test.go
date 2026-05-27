@@ -11,7 +11,6 @@ func ExamplePermissionRegistry() {
 			"Billing",
 			"Read Invoice",
 			"Allows reading invoice records.",
-			true,
 		).WithFields([]string{"id", "amount", "currency"}).Definition(),
 	)
 

@@ -37,7 +37,7 @@ func TestJSONStore_SaveLoadAndHasPermission(t *testing.T) {
 	}
 
 	teamID := int64(42)
-	svc := permissions.NewService(reloaded)
+	svc := permissions.NewService(reloaded, reloaded)
 	allowed, err := svc.HasPermission(context.Background(), permissions.Request{
 		UserID: "u-1",
 		TeamID: &teamID,

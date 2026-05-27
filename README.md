@@ -28,8 +28,8 @@ go get github.com/wtiger001/go-permissions
 
 ## Core Concepts
 
-1. IdentityResolver: resolves user to group membership.
-2. PolicyStore: roles, grants, and policy graph data.
+1. IdentityProvider: resolves user/group membership data.
+2. PermissionStore: roles, grants, and policy graph data.
 3. Service: authorization engine that combines identity and policy.
 4. PermissionRegistry: catalog of known permission definitions.
 
@@ -41,10 +41,12 @@ Interfaces are defined in [store.go](store.go).
 
 ```go
 ctx := context.Background()
-store := inmemory.NewStore()
-svc := permissions.NewService(store)
+permissionStore := inmemory.NewStore()
+identityProvider := inmemory.NewIdentityProvider()
+svc := permissions.NewService(permissionStore, identityProvider)
 
 _ = svc.AllowUser(ctx, "user-1", "projects.view", nil)
+_ = svc.AllowUserFor(ctx, "user-1", "projects.share", nil, 30*time.Minute)
 ok, err := svc.HasSystemPermission(ctx, "user-1", "projects.view")
 ```
 
@@ -53,7 +55,7 @@ ok, err := svc.HasSystemPermission(ctx, "user-1", "projects.view")
 Use your own identity adapter plus a policy backend:
 
 ```go
-svc := permissions.NewServiceWithIdentity(identityAdapter, postgresStore)
+svc := permissions.NewService(postgresStore, identityAdapter)
 ```
 
 A concrete external identity adapter example is in [example_identity_adapter_test.go](example_identity_adapter_test.go).
@@ -73,7 +75,10 @@ Convenience write helpers:
 1. AllowUser
 2. DenyUser
 3. AllowRole
-4. AssignRoleToUser
+4. AllowUserUntil / AllowUserFor
+5. DenyUserUntil / DenyUserFor
+6. AllowRoleUntil / AllowRoleFor
+7. AssignRoleToUser
 
 These require store write capabilities via:
 
@@ -81,6 +86,26 @@ These require store write capabilities via:
 2. RoleAssignmentWriter
 
 Defined in [store.go](store.go).
+
+### Expiring Grants
+
+Most grants are permanent and use:
+
+1. AllowUser
+2. DenyUser
+3. AllowRole
+
+For temporary access, use:
+
+1. `...Until` when you have a fixed expiration timestamp.
+2. `...For` when you have a TTL duration.
+
+Example patterns:
+
+- `svc.AllowUserUntil(ctx, userID, perm, objectID, expiresAt)`
+- `svc.AllowUserFor(ctx, userID, perm, objectID, 30*time.Minute)`
+- `svc.DenyUserFor(ctx, userID, perm, objectID, 15*time.Minute)`
+- `svc.AllowRoleUntil(ctx, roleID, perm, objectID, expiresAt)`
 
 ## Backends
 

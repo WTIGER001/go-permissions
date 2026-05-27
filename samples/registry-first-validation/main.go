@@ -6,13 +6,13 @@ import (
 
 	"github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
-	"github.com/wtiger001/go-permissions/samples/shared"
 )
 
 func main() {
 	ctx := context.Background()
 	store := inmemory.NewStore()
-	svc := permissions.NewService(store)
+	identity := inmemory.NewIdentityProvider()
+	svc := permissions.NewServiceWithProviders(store, identity)
 
 	registry := permissions.NewPermissionRegistry()
 	validPerm := permissions.NewSystemPermission(
@@ -20,8 +20,7 @@ func main() {
 		"FinOps",
 		"View System Report",
 		"Allows viewing system-wide FinOps reporting.",
-		true,
-	)
+	).WithChecker(svc)
 
 	fmt.Println("attempt invalid grant")
 	if err := allowUserWithRegistry(ctx, svc, registry, "ops-user", "finops.system.typo", nil); err != nil {
@@ -30,13 +29,13 @@ func main() {
 
 	fmt.Println("register valid permission and retry")
 	registry.MustRegister(validPerm.Definition())
-	shared.Must(allowUserWithRegistry(ctx, svc, registry, "ops-user", validPerm.ID(), nil))
-
-	ok, err := svc.HasSystemPermission(ctx, "ops-user", validPerm.ID())
-	if err != nil {
-		fmt.Printf("check error: %v\n", err)
+	if err := allowUserWithRegistry(ctx, svc, registry, "ops-user", validPerm.ID(), nil); err != nil {
+		fmt.Printf("grant error: %v\n", err)
 		return
 	}
+
+	ok := validPerm.Can(ctx, "ops-user")
+
 	fmt.Printf("ops-user has %s: %t\n", validPerm.ID(), ok)
 }
 

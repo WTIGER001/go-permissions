@@ -1,19 +1,20 @@
-package main
+package examples
 
 import (
 	"context"
-	"fmt"
 	"strconv"
+	"testing"
 
-	"github.com/wtiger001/go-permissions"
+	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
 )
 
-func main() {
+// TestFinanceReadVsExport verifies broad read access with tighter export controls and deny precedence.
+func TestFinanceReadVsExport(t *testing.T) {
 	ctx := context.Background()
 	store := inmemory.NewStore()
 	identity := inmemory.NewIdentityProvider()
-	svc := permissions.NewServiceWithProviders(store, identity)
+	svc := permissions.NewService(store, identity)
 
 	readPerm := permissions.NewTeamPermission("finops.read", "FinOps", "Read FinOps", "Allows reading FinOps data for a team.").WithChecker(svc)
 	exportPerm := permissions.NewTeamPermission("finops.export", "FinOps", "Export FinOps", "Allows exporting FinOps data for a team.").WithChecker(svc)
@@ -29,13 +30,22 @@ func main() {
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "intern", Effect: permissions.EffectDeny, TeamScope: teamScope, PermissionName: exportPerm.ID()},
 	)
 
-	for _, user := range []string{"analyst", "manager", "intern"} {
-		labelRead := fmt.Sprintf("%s can read finops", user)
-		okRead := readPerm.Can(ctx, user, teamID)
-		fmt.Printf("%s: %t\n", labelRead, okRead)
-
-		labelExport := fmt.Sprintf("%s can export finops", user)
-		okExport := exportPerm.Can(ctx, user, teamID)
-		fmt.Printf("%s: %t\n", labelExport, okExport)
+	if got := readPerm.Can(ctx, "analyst", teamID); got != true {
+		t.Fatalf("analyst read got %v want true", got)
+	}
+	if got := exportPerm.Can(ctx, "analyst", teamID); got != false {
+		t.Fatalf("analyst export got %v want false", got)
+	}
+	if got := readPerm.Can(ctx, "manager", teamID); got != true {
+		t.Fatalf("manager read got %v want true", got)
+	}
+	if got := exportPerm.Can(ctx, "manager", teamID); got != true {
+		t.Fatalf("manager export got %v want true", got)
+	}
+	if got := readPerm.Can(ctx, "intern", teamID); got != true {
+		t.Fatalf("intern read got %v want true", got)
+	}
+	if got := exportPerm.Can(ctx, "intern", teamID); got != false {
+		t.Fatalf("intern export got %v want false", got)
 	}
 }

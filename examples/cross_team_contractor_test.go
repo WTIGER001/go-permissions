@@ -1,19 +1,20 @@
-package main
+package examples
 
 import (
 	"context"
-	"fmt"
 	"strconv"
+	"testing"
 
-	"github.com/wtiger001/go-permissions"
+	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
 )
 
-func main() {
+// TestCrossTeamContractor verifies one contractor can access only explicitly granted teams.
+func TestCrossTeamContractor(t *testing.T) {
 	ctx := context.Background()
 	store := inmemory.NewStore()
 	identity := inmemory.NewIdentityProvider()
-	svc := permissions.NewServiceWithProviders(store, identity)
+	svc := permissions.NewService(store, identity)
 
 	perm := permissions.NewTeamPermission("tasks.view", "Tasks", "View Tasks", "Allows viewing tasks for a team.").WithChecker(svc)
 
@@ -22,9 +23,18 @@ func main() {
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "contractor-1", Effect: permissions.EffectAllow, TeamScope: strconv.FormatInt(33, 10), PermissionName: perm.ID()},
 	)
 
-	for _, team := range []int64{11, 22, 33, 44} {
-		label := fmt.Sprintf("contractor-1 can view tasks for team %d", team)
-		ok := perm.Can(ctx, "contractor-1", team)
-		fmt.Printf("%s: %t\n", label, ok)
+	cases := []struct {
+		team int64
+		want bool
+	}{
+		{11, true},
+		{22, false},
+		{33, true},
+		{44, false},
+	}
+	for _, tc := range cases {
+		if got := perm.Can(ctx, "contractor-1", tc.team); got != tc.want {
+			t.Fatalf("team %d got %v want %v", tc.team, got, tc.want)
+		}
 	}
 }

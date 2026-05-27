@@ -18,7 +18,7 @@ This library currently provides:
 - PostgreSQL store
 - JSON file store
 - cached wrapper store
-3. A sample suite under [samples](samples) for modeling scenarios.
+3. An examples suite under [examples](examples) for modeling scenarios.
 
 ## Installation
 
@@ -132,12 +132,13 @@ Registry APIs are defined in [registry.go](registry.go):
 3. List / ListByNamespace
 4. Definition adapters on permission builder types
 
-## Samples
+## Examples
 
-Scenario samples live under [samples](samples), each in its own folder with:
+Scenario examples live under [examples](examples) as flat test files:
 
-1. a Markdown walkthrough
-2. a main.go runnable example
+1. one `<scenario>_test.go` file per scenario
+2. one self-contained `Test...` function per file
+3. a function-level comment describing the scenario
 
 ## Testing and Build
 

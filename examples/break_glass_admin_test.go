@@ -1,37 +1,37 @@
-package main
+package examples
 
 import (
 	"context"
-	"fmt"
+	"testing"
 
-	"github.com/wtiger001/go-permissions"
+	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
 )
 
-func main() {
+// TestBreakGlassAdmin verifies emergency role access with an explicit object-level deny guardrail.
+func TestBreakGlassAdmin(t *testing.T) {
 	ctx := context.Background()
 	store := inmemory.NewStore()
 	identity := inmemory.NewIdentityProvider()
-	svc := permissions.NewServiceWithProviders(store, identity)
+	svc := permissions.NewService(store, identity)
 
 	perm := permissions.NewObjectPermission("incidents.resolve", "Incidents", "Resolve Incident", "Allows resolving incidents.").WithChecker(svc)
 
 	if err := svc.AllowRole(ctx, "role.break_glass", perm.ID(), nil); err != nil {
-		panic(err)
+		t.Fatalf("allow role: %v", err)
 	}
 	if err := svc.AssignRoleToUser(ctx, "oncall-admin", "role.break_glass", nil); err != nil {
-		panic(err)
+		t.Fatalf("assign role: %v", err)
 	}
 	incident42 := "incident-42"
 	if err := svc.DenyUser(ctx, "oncall-admin", perm.ID(), &incident42); err != nil {
-		panic(err)
+		t.Fatalf("deny user: %v", err)
 	}
 
-	if perm.Can(ctx, "oncall-admin", "incident-41") {
-		fmt.Print("oncall-admin can resolve incident-41\n")
+	if got := perm.Can(ctx, "oncall-admin", "incident-41"); got != true {
+		t.Fatalf("incident-41 got %v want true", got)
 	}
-
-	if !perm.Can(ctx, "oncall-admin", "incident-42") {
-		fmt.Print("oncall-admin cannot resolve incident-42\n")
+	if got := perm.Can(ctx, "oncall-admin", "incident-42"); got != false {
+		t.Fatalf("incident-42 got %v want false", got)
 	}
 }

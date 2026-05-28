@@ -41,9 +41,9 @@ Interfaces are defined in [store.go](store.go).
 
 ```go
 ctx := context.Background()
-permissionStore := inmemory.NewStore()
-identityProvider := inmemory.NewIdentityProvider()
-svc := permissions.NewService(permissionStore, identityProvider)
+svc := permissions.New()
+svc.SetIdentityProvider(inmemory.NewIdentityProvider())
+_ = svc.SetStore(inmemory.NewStore())
 
 _ = svc.AllowUser(ctx, "user-1", "projects.view", nil)
 _ = svc.AllowUserFor(ctx, "user-1", "projects.share", nil, 30*time.Minute)
@@ -58,7 +58,62 @@ Use your own identity adapter plus a policy backend:
 svc := permissions.NewService(postgresStore, identityAdapter)
 ```
 
+### Staged startup with built-ins
+
+The staged setup API supports wiring identity/store later and auto-seeding built-ins when the store is set.
+
+```go
+ctx := context.Background()
+
+svc := permissions.New()
+svc.SetIdentityProvider(identityAdapter)
+svc.SetSyntheticRoleIDs(
+	permissions.SyntheticRolePublic,
+	permissions.SyntheticRoleAuthenticated,
+	permissions.SyntheticRoleAdmin,
+)
+svc.SetAdminGroupID("group.admins")
+svc.SetBuiltInGrants([]permissions.Grant{
+	{
+		OwnerKind:      permissions.PrincipalRole,
+		OwnerID:        permissions.SyntheticRolePublic,
+		Effect:         permissions.EffectAllow,
+		TeamScope:      "*",
+		PermissionName: "assets.read",
+	},
+})
+
+// SetStore automatically calls SaveBuiltIns with the configured built-in grants.
+if err := svc.SetStore(postgresStore); err != nil {
+	return err
+}
+
+// Optional explicit call if you need to seed an additional one-off set.
+if err := svc.SaveBuiltIns(ctx, extraBuiltIns); err != nil {
+	return err
+}
+```
+
 A concrete external identity adapter example is in [example_identity_adapter_test.go](example_identity_adapter_test.go).
+
+### Production startup checklist
+
+Recommended startup sequence for production services:
+
+1. Construct the service (`svc := permissions.New()`).
+2. Set identity provider (`svc.SetIdentityProvider(identityProvider)`).
+3. Configure synthetic role IDs (`svc.SetSyntheticRoleIDs(...)`) and admin group (`svc.SetAdminGroupID(...)`) when used.
+4. Configure built-in grants (`svc.SetBuiltInGrants(defaultBuiltIns)`).
+5. Set the backing store (`svc.SetStore(store)`), which automatically triggers built-in seeding.
+6. Start serving traffic only after step 5 succeeds.
+
+Operational guidance:
+
+1. Treat `SetStore` bootstrap failures as startup-fatal for strict authorization environments.
+2. If your deployment policy allows degraded startup, gate protected endpoints until bootstrap succeeds.
+3. Prefer retry with backoff for transient store connectivity errors before failing startup.
+4. Keep built-in grants deterministic and code-defined so repeated startup remains idempotent.
+5. Use explicit migrations/admin tooling for policy changes that should override existing manual policy.
 
 ## Main APIs
 
@@ -67,8 +122,10 @@ Defined in [service.go](service.go):
 1. HasPermission
 2. HasSystemPermission
 3. HasTeamPermission
-4. EffectivePermissions
-5. PrincipalsWithPermission
+4. HasFieldPermission
+5. FilterPermittedFields
+6. EffectivePermissions
+7. PrincipalsWithPermission
 
 Convenience write helpers:
 
@@ -80,12 +137,20 @@ Convenience write helpers:
 6. AllowRoleUntil / AllowRoleFor
 7. AssignRoleToUser
 
-These require store write capabilities via:
+Write operations are part of PermissionStore (see [store.go](store.go)).
 
-1. GrantWriter
-2. RoleAssignmentWriter
+### Field-Scoped Grants
 
-Defined in [store.go](store.go).
+Grants can optionally scope access with `Grant.RestrictedFields`.
+
+1. Empty restricted list means the grant applies to all fields.
+2. Non-empty restricted list means those paths (and nested subpaths) are excluded.
+3. Indexed array paths (for example `items.0.name`) are not supported.
+
+Field-aware APIs:
+
+1. `svc.HasFieldPermission(ctx, req, "profile.email")`
+2. `svc.FilterPermittedFields(ctx, req, []string{"profile.email", "profile.secret"})`
 
 ### Expiring Grants
 

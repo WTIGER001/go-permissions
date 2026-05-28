@@ -30,8 +30,43 @@ func newContractStore(t *testing.T) *postgresHarnessStore {
 	if err := store.EnsureSchema(ctx); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
+	if err := ensureIdentityTables(ctx, pool); err != nil {
+		t.Fatalf("ensure identity tables: %v", err)
+	}
 
 	return &postgresHarnessStore{Store: store}
+}
+
+// ensureIdentityTables creates user/group tables needed by the harness identity provider.
+// These are test-only and not managed by the production EnsureSchema.
+func ensureIdentityTables(ctx context.Context, pool *pgxpool.Pool) error {
+	stmts := []string{
+		`create table if not exists users (
+			id text primary key,
+			display_name text not null
+		);`,
+		`create table if not exists groups (
+			id text primary key,
+			name text not null
+		);`,
+		`create table if not exists group_members (
+			group_id text not null references groups(id) on delete cascade,
+			user_id text not null references users(id) on delete cascade,
+			primary key (group_id, user_id)
+		);`,
+		`create table if not exists group_closure (
+			ancestor_group_id text not null references groups(id) on delete cascade,
+			descendant_group_id text not null references groups(id) on delete cascade,
+			depth int not null,
+			primary key (ancestor_group_id, descendant_group_id)
+		);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func TestPostgresServiceContractSuite(t *testing.T) {
@@ -61,6 +96,65 @@ func (s *postgresHarnessStore) Reset(ctx context.Context, t *testing.T) {
 	if _, err := s.pool.Exec(ctx, stmt); err != nil {
 		t.Fatalf("reset postgres harness data: %v", err)
 	}
+}
+
+func (s *postgresHarnessStore) GetUserGroups(ctx context.Context, userID string) ([]string, error) {
+	const query = `
+select gc.ancestor_group_id
+from group_members gm
+join group_closure gc on gc.descendant_group_id = gm.group_id
+where gm.user_id = $1
+`
+	rows, err := s.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *postgresHarnessStore) GetGroupMembers(ctx context.Context, groupID string) ([]string, error) {
+	const query = `
+select distinct gm.user_id
+from group_members gm
+join group_closure gc on gc.descendant_group_id = gm.group_id
+where gc.ancestor_group_id = $1
+`
+	rows, err := s.pool.Query(ctx, query, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *postgresHarnessStore) IsUserInGroup(ctx context.Context, userID, groupID string) (bool, error) {
+	const query = `
+select exists (
+	select 1 from group_members gm
+	join group_closure gc on gc.descendant_group_id = gm.group_id
+	where gm.user_id = $1 and gc.ancestor_group_id = $2
+)
+`
+	var exists bool
+	err := s.pool.QueryRow(ctx, query, userID, groupID).Scan(&exists)
+	return exists, err
 }
 
 func (s *postgresHarnessStore) SeedDenyOverridesAllow(ctx context.Context, t *testing.T) permissions.Request {

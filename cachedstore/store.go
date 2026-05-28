@@ -3,7 +3,6 @@ package cachedstore
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	cache "github.com/patrickmn/go-cache"
@@ -170,11 +169,7 @@ func (s *Store) PrincipalsWithGrant(ctx context.Context, req permissions.Request
 }
 
 func (s *Store) CreateGrant(ctx context.Context, grant permissions.Grant) error {
-	writer, ok := s.base.(permissions.GrantWriter)
-	if !ok {
-		return fmt.Errorf("base store does not support grant writes")
-	}
-	if err := writer.CreateGrant(ctx, grant); err != nil {
+	if err := s.base.CreateGrant(ctx, grant); err != nil {
 		return err
 	}
 	s.InvalidateAll()
@@ -182,11 +177,31 @@ func (s *Store) CreateGrant(ctx context.Context, grant permissions.Grant) error 
 }
 
 func (s *Store) AssignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string, bindingValues map[string]any) error {
-	writer, ok := s.base.(permissions.RoleAssignmentWriter)
-	if !ok {
-		return fmt.Errorf("base store does not support role assignment writes")
+	if err := s.base.AssignRole(ctx, principal, roleID, cloneMap(bindingValues)); err != nil {
+		return err
 	}
-	if err := writer.AssignRole(ctx, principal, roleID, cloneMap(bindingValues)); err != nil {
+	s.InvalidateAll()
+	return nil
+}
+
+func (s *Store) CreateRole(ctx context.Context, role permissions.Role) error {
+	if err := s.base.CreateRole(ctx, role); err != nil {
+		return err
+	}
+	s.InvalidateAll()
+	return nil
+}
+
+func (s *Store) UpdateRole(ctx context.Context, role permissions.Role) error {
+	if err := s.base.UpdateRole(ctx, role); err != nil {
+		return err
+	}
+	s.InvalidateAll()
+	return nil
+}
+
+func (s *Store) DeleteRole(ctx context.Context, roleID string) error {
+	if err := s.base.DeleteRole(ctx, roleID); err != nil {
 		return err
 	}
 	s.InvalidateAll()
@@ -242,7 +257,7 @@ func cloneGrants(values []permissions.Grant) []permissions.Grant {
 		copied := grant
 		copied.ObjectScope = cloneStringPtr(grant.ObjectScope)
 		copied.ExpiresAt = cloneTimePtr(grant.ExpiresAt)
-		copied.FieldAllowlist = append([]string(nil), grant.FieldAllowlist...)
+		copied.RestrictedFields = append([]string(nil), grant.RestrictedFields...)
 		copied.VariableSpec = cloneMap(grant.VariableSpec)
 		result = append(result, copied)
 	}

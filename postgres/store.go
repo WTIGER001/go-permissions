@@ -20,95 +20,6 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-func (s *Store) GetUserGroups(ctx context.Context, userID string) ([]string, error) {
-	return s.ListUserGroupIDs(ctx, userID)
-}
-
-func (s *Store) GetGroupMembers(ctx context.Context, groupID string) ([]string, error) {
-	const query = `
-select distinct gm.user_id
-from group_members gm
-join group_closure gc on gc.descendant_group_id = gm.group_id
-where gc.ancestor_group_id = $1
-`
-
-	rows, err := s.pool.Query(ctx, query, groupID)
-	if err != nil {
-		return nil, fmt.Errorf("query group members: %w", err)
-	}
-	defer rows.Close()
-
-	userIDs := make([]string, 0, 8)
-	for rows.Next() {
-		var userID string
-		if err := rows.Scan(&userID); err != nil {
-			return nil, fmt.Errorf("scan group member user ID: %w", err)
-		}
-		userIDs = append(userIDs, userID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate group members: %w", err)
-	}
-
-	return userIDs, nil
-}
-
-func (s *Store) ListKnownGroupIDs(ctx context.Context) ([]string, error) {
-	const query = `
-select group_id
-from (
-	select distinct principal_id as group_id
-	from principal_roles
-	where principal_kind = 'group'
-
-	union
-
-	select distinct owner_id as group_id
-	from permission_grants
-	where owner_kind = 'group'
-) g
-`
-
-	rows, err := s.pool.Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("query known groups: %w", err)
-	}
-	defer rows.Close()
-
-	groupIDs := make([]string, 0, 16)
-	for rows.Next() {
-		var groupID string
-		if err := rows.Scan(&groupID); err != nil {
-			return nil, fmt.Errorf("scan known group ID: %w", err)
-		}
-		groupIDs = append(groupIDs, groupID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate known groups: %w", err)
-	}
-
-	return groupIDs, nil
-}
-
-func (s *Store) IsUserInGroup(ctx context.Context, userID, groupID string) (bool, error) {
-	const query = `
-select exists (
-	select 1
-	from group_members gm
-	join group_closure gc on gc.descendant_group_id = gm.group_id
-	where gm.user_id = $1
-	  and gc.ancestor_group_id = $2
-)
-`
-
-	var exists bool
-	if err := s.pool.QueryRow(ctx, query, userID, groupID).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check user group membership: %w", err)
-	}
-
-	return exists, nil
-}
-
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -127,22 +38,6 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		exception
 			when duplicate_object then null;
 		end $$;`,
-		`create table if not exists users (
-			id text primary key,
-			external_key text unique,
-			email text unique,
-			display_name text not null,
-			created_at timestamptz not null default now(),
-			updated_at timestamptz not null default now()
-		);`,
-		`create table if not exists groups (
-			id text primary key,
-			team_id bigint null,
-			name text not null,
-			created_at timestamptz not null default now(),
-			updated_at timestamptz not null default now(),
-			unique (team_id, name)
-		);`,
 		`create table if not exists roles (
 			id text primary key,
 			code text not null unique,
@@ -150,18 +45,6 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 			built_in boolean not null default false,
 			created_at timestamptz not null default now(),
 			updated_at timestamptz not null default now()
-		);`,
-		`create table if not exists group_members (
-			group_id text not null references groups(id) on delete cascade,
-			user_id text not null references users(id) on delete cascade,
-			created_at timestamptz not null default now(),
-			primary key (group_id, user_id)
-		);`,
-		`create table if not exists group_closure (
-			ancestor_group_id text not null references groups(id) on delete cascade,
-			descendant_group_id text not null references groups(id) on delete cascade,
-			depth int not null,
-			primary key (ancestor_group_id, descendant_group_id)
 		);`,
 		`create table if not exists role_inheritance (
 			parent_role_id text not null references roles(id) on delete cascade,
@@ -198,8 +81,6 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 			updated_at timestamptz not null default now()
 		);`,
 		`alter table permission_grants add column if not exists expires_at timestamptz null;`,
-		`create index if not exists idx_group_members_user on group_members (user_id, group_id);`,
-		`create index if not exists idx_group_closure_descendant on group_closure (descendant_group_id, ancestor_group_id);`,
 		`create index if not exists idx_role_assignments_principal on principal_roles (principal_kind, principal_id, role_id);`,
 		`create index if not exists idx_role_closure_ancestor on role_closure (ancestor_role_id, descendant_role_id);`,
 		`create index if not exists idx_permission_grants_owner_perm on permission_grants (owner_kind, owner_id, permission_name);`,
@@ -217,35 +98,6 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func (s *Store) ListUserGroupIDs(ctx context.Context, userID string) ([]string, error) {
-	const query = `
-select gc.ancestor_group_id
-from group_members gm
-join group_closure gc on gc.descendant_group_id = gm.group_id
-where gm.user_id = $1
-`
-
-	rows, err := s.pool.Query(ctx, query, userID)
-	if err != nil {
-		return nil, fmt.Errorf("query user groups: %w", err)
-	}
-	defer rows.Close()
-
-	groupIDs := make([]string, 0, 8)
-	for rows.Next() {
-		var groupID string
-		if err := rows.Scan(&groupID); err != nil {
-			return nil, fmt.Errorf("scan group ID: %w", err)
-		}
-		groupIDs = append(groupIDs, groupID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate user groups: %w", err)
-	}
-
-	return groupIDs, nil
 }
 
 func (s *Store) ListRoleAssignmentsForUserAndGroups(ctx context.Context, userID string, groupIDs []string) ([]permissions.RoleAssignment, error) {
@@ -437,7 +289,7 @@ where ($3::text = '' or pg.permission_name = $3)
 			&grant.ObjectScope,
 			&grant.PermissionName,
 			&grant.ExpiresAt,
-			&grant.FieldAllowlist,
+			&grant.RestrictedFields,
 			&variableSpecRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan grant: %w", err)
@@ -594,6 +446,86 @@ where id = $1
 	return role, nil
 }
 
+func (s *Store) CreateRole(ctx context.Context, role permissions.Role) error {
+	if role.ID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+	if role.Name == "" {
+		return fmt.Errorf("role name is required")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	const insertRole = `
+insert into roles (id, code, description, built_in)
+values ($1, $2, $3, $4)
+`
+	if _, err := tx.Exec(ctx, insertRole, role.ID, role.Name, role.Description, false); err != nil {
+		return fmt.Errorf("insert role: %w", err)
+	}
+
+	// Every role is its own ancestor at depth 0 so ExpandRoles works immediately.
+	const insertSelfClosure = `
+insert into role_closure (ancestor_role_id, descendant_role_id, depth)
+values ($1, $1, 0)
+on conflict do nothing
+`
+	if _, err := tx.Exec(ctx, insertSelfClosure, role.ID); err != nil {
+		return fmt.Errorf("insert role self-closure: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit create role: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Store) UpdateRole(ctx context.Context, role permissions.Role) error {
+	if role.ID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+	if role.Name == "" {
+		return fmt.Errorf("role name is required")
+	}
+
+	const stmt = `
+update roles
+set code = $2, description = $3, updated_at = now()
+where id = $1
+`
+	tag, err := s.pool.Exec(ctx, stmt, role.ID, role.Name, role.Description)
+	if err != nil {
+		return fmt.Errorf("update role: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("role not found: %s", role.ID)
+	}
+
+	return nil
+}
+
+func (s *Store) DeleteRole(ctx context.Context, roleID string) error {
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+
+	const stmt = `delete from roles where id = $1`
+	tag, err := s.pool.Exec(ctx, stmt, roleID)
+	if err != nil {
+		return fmt.Errorf("delete role: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("role not found: %s", roleID)
+	}
+
+	return nil
+}
+
 func (s *Store) CreateGrant(ctx context.Context, grant permissions.Grant) error {
 	if grant.OwnerID == "" {
 		return fmt.Errorf("owner ID is required")
@@ -639,7 +571,7 @@ insert into permission_grants (
 		grant.ObjectScope,
 		grant.PermissionName,
 		grant.ExpiresAt,
-		grant.FieldAllowlist,
+		grant.RestrictedFields,
 		variableSpecRaw,
 	); err != nil {
 		return fmt.Errorf("insert permission grant: %w", err)

@@ -293,10 +293,15 @@ type IdentityProvider interface {
 type PermissionStore interface {
 	RoleDefinitions(ctx context.Context) ([]Role, error)
 	RoleDefinition(ctx context.Context, roleID string) (Role, error)
+	CreateRole(ctx context.Context, role Role) error
+	UpdateRole(ctx context.Context, role Role) error
+	DeleteRole(ctx context.Context, roleID string) error
 	RoleAssignmentsForPrincipal(ctx context.Context, principal PrincipalRef) ([]RoleAssignment, error)
+	AssignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error
 	ExpandRoles(ctx context.Context, roleIDs []string) ([]string, error)
 	GrantsForPrincipal(ctx context.Context, principal PrincipalRef) ([]Grant, error)
 	GrantsForOwners(ctx context.Context, owners []PrincipalRef, req Request) ([]Grant, error)
+	CreateGrant(ctx context.Context, grant Grant) error
 	PrincipalsWithGrant(ctx context.Context, req Request) ([]PrincipalHit, error)
 }
 
@@ -304,6 +309,13 @@ type AuthorizationService struct {
 	identity    IdentityProvider
 	permissions PermissionStore
 }
+
+// Service construction also supports staged setup:
+// svc := permissions.New()
+// svc.SetIdentityProvider(identityProvider)
+// _ = svc.SetStore(permissionStore)
+// svc.SetBuiltInGrants(defaultBuiltIns)
+// _ = svc.SaveBuiltIns(ctx, defaultBuiltIns)
 ```
 
 ### Public API

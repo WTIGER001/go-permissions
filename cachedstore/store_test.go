@@ -85,6 +85,10 @@ func (s *countingStore) AssignRole(_ context.Context, _ permissions.PrincipalRef
 	return nil
 }
 
+func (s *countingStore) CreateRole(_ context.Context, _ permissions.Role) error { return nil }
+func (s *countingStore) UpdateRole(_ context.Context, _ permissions.Role) error { return nil }
+func (s *countingStore) DeleteRole(_ context.Context, _ string) error           { return nil }
+
 func TestStore_CachesReadResults(t *testing.T) {
 	base := &countingStore{}
 	store := NewStoreWithTTL(base, time.Minute)

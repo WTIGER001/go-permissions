@@ -416,6 +416,10 @@ func (s *Store) RoleDefinition(_ context.Context, roleID string) (permissions.Ro
 	return permissions.Role{ID: roleID, Name: roleID, VariableSpec: map[string]any{}, Permissions: []string{}}, nil
 }
 
+func (s *Store) CreateRole(_ context.Context, _ permissions.Role) error { return nil }
+func (s *Store) UpdateRole(_ context.Context, _ permissions.Role) error { return nil }
+func (s *Store) DeleteRole(_ context.Context, _ string) error           { return nil }
+
 func emptyData() Data {
 	return Data{
 		UserGroups:           map[string][]string{},
@@ -496,7 +500,7 @@ func cloneGrant(grant permissions.Grant) permissions.Grant {
 	copyGrant := grant
 	copyGrant.ObjectScope = cloneStringPtr(grant.ObjectScope)
 	copyGrant.ExpiresAt = cloneTimePtr(grant.ExpiresAt)
-	copyGrant.FieldAllowlist = append([]string(nil), grant.FieldAllowlist...)
+	copyGrant.RestrictedFields = append([]string(nil), grant.RestrictedFields...)
 	copyGrant.VariableSpec = map[string]any{}
 	for k, v := range grant.VariableSpec {
 		copyGrant.VariableSpec[k] = v

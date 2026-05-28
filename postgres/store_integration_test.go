@@ -36,11 +36,9 @@ func TestEnsureSchemaCreatesCoreTables(t *testing.T) {
 	ctx := context.Background()
 
 	for _, table := range []string{
-		"users",
-		"groups",
 		"roles",
-		"group_members",
-		"group_closure",
+		"role_inheritance",
+		"role_closure",
 		"principal_roles",
 		"permission_grants",
 	} {
@@ -59,13 +57,6 @@ func TestStoreQueries_EndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	seedStatements := []string{
-		"insert into users (id, display_name) values ('u-1', 'User One')",
-		"insert into groups (id, name) values ('g-child', 'Child Group')",
-		"insert into groups (id, name) values ('g-parent', 'Parent Group')",
-		"insert into group_members (group_id, user_id) values ('g-child', 'u-1')",
-		"insert into group_closure (ancestor_group_id, descendant_group_id, depth) values ('g-child', 'g-child', 0)",
-		"insert into group_closure (ancestor_group_id, descendant_group_id, depth) values ('g-parent', 'g-parent', 0)",
-		"insert into group_closure (ancestor_group_id, descendant_group_id, depth) values ('g-parent', 'g-child', 1)",
 		"insert into roles (id, code) values ('r-base', 'base')",
 		"insert into roles (id, code) values ('r-child', 'child')",
 		"insert into role_closure (ancestor_role_id, descendant_role_id, depth) values ('r-base', 'r-base', 0)",
@@ -83,13 +74,8 @@ func TestStoreQueries_EndToEnd(t *testing.T) {
 		}
 	}
 
-	groupIDs, err := store.ListUserGroupIDs(ctx, "u-1")
-	if err != nil {
-		t.Fatalf("ListUserGroupIDs: %v", err)
-	}
-	if len(groupIDs) != 2 {
-		t.Fatalf("expected 2 group IDs, got %d (%v)", len(groupIDs), groupIDs)
-	}
+	// Group IDs are resolved externally by the identity provider; pass them directly.
+	groupIDs := []string{"g-child", "g-parent"}
 
 	roleAssignments, err := store.ListRoleAssignmentsForUserAndGroups(ctx, "u-1", groupIDs)
 	if err != nil {
@@ -136,8 +122,6 @@ func TestListPrincipalsWithGrant_DenyOverridesAllow(t *testing.T) {
 	ctx := context.Background()
 
 	seedStatements := []string{
-		"insert into users (id, display_name) values ('u-1', 'User One')",
-		"insert into groups (id, name) values ('g-1', 'Group One')",
 		"insert into roles (id, code) values ('r-1', 'Role One')",
 		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('user', 'u-1', 'allow', '42', null, 'billing.read', '{}'::jsonb)",
 		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('group', 'g-1', 'allow', '42', null, 'billing.read', '{}'::jsonb)",

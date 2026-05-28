@@ -13,6 +13,12 @@ const (
 	PrincipalRole  PrincipalKind = "role"
 )
 
+const (
+	SyntheticRolePublic        = "builtin.public"
+	SyntheticRoleAuthenticated = "builtin.authenticated"
+	SyntheticRoleAdmin         = "builtin.admin"
+)
+
 type Effect string
 
 const (
@@ -38,16 +44,16 @@ type RoleAssignment struct {
 }
 
 type Grant struct {
-	ID             int64
-	OwnerKind      PrincipalKind
-	OwnerID        string
-	Effect         Effect
-	TeamScope      string
-	ObjectScope    *string
-	PermissionName string
-	ExpiresAt      *time.Time
-	FieldAllowlist []string
-	VariableSpec   map[string]any
+	ID               int64
+	OwnerKind        PrincipalKind
+	OwnerID          string
+	Effect           Effect
+	TeamScope        string
+	ObjectScope      *string
+	PermissionName   string
+	ExpiresAt        *time.Time
+	RestrictedFields []string
+	VariableSpec     map[string]any
 }
 
 func (g Grant) IsActiveAt(now time.Time) bool {
@@ -62,12 +68,12 @@ func (g Grant) IsExpiredAt(now time.Time) bool {
 }
 
 type EffectivePermission struct {
-	TeamScope      string
-	ObjectScope    *string
-	PermissionName string
-	Source         PrincipalRef
-	Effect         Effect
-	Fields         []string
+	TeamScope        string
+	ObjectScope      *string
+	PermissionName   string
+	Source           PrincipalRef
+	Effect           Effect
+	RestrictedFields []string
 }
 
 type PrincipalHit struct {

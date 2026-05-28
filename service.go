@@ -93,6 +93,34 @@ func (s *Service) AddDefaultGrant(roleID, permission, teamScope string) {
 	s.builtInGrants = append(s.builtInGrants, grant)
 }
 
+// AddDefaultSystemCRUDGrants adds default allow grants for all system CRUD permissions.
+func (s *Service) AddDefaultSystemCRUDGrants(roleID, teamScope string, crud SystemCRUDPermissions) {
+	s.AddDefaultGrant(roleID, crud.Create.ID(), teamScope)
+	s.AddDefaultGrant(roleID, crud.Read.ID(), teamScope)
+	s.AddDefaultGrant(roleID, crud.Update.ID(), teamScope)
+	s.AddDefaultGrant(roleID, crud.Delete.ID(), teamScope)
+	s.AddDefaultGrant(roleID, crud.Grant.ID(), teamScope)
+}
+
+// AddDefaultTeamCRUDGrants adds default allow grants for all team CRUD permissions.
+func (s *Service) AddDefaultTeamCRUDGrants(roleID, teamScope string, crud TeamCRUDPermissions) {
+	s.AddDefaultGrant(roleID, crud.Create.ID(), teamScope)
+	s.AddDefaultGrant(roleID, crud.Read.ID(), teamScope)
+	s.AddDefaultGrant(roleID, crud.Update.ID(), teamScope)
+	s.AddDefaultGrant(roleID, crud.Delete.ID(), teamScope)
+	s.AddDefaultGrant(roleID, crud.Grant.ID(), teamScope)
+}
+
+// AddDefaultCRUDGrant adds a default allow grant for a single CRUD action.
+func (s *Service) AddDefaultCRUDGrant(roleID, teamScope string, action CRUDAction, permissionID string) {
+	switch action {
+	case CRUDCreate, CRUDRead, CRUDUpdate, CRUDDelete, CRUDGrant:
+		s.AddDefaultGrant(roleID, permissionID, teamScope)
+	default:
+		panic("invalid CRUD action")
+	}
+}
+
 func (s *Service) applyDefaultSyntheticRoleIDs() {
 	if strings.TrimSpace(s.publicRoleID) == "" {
 		s.publicRoleID = SyntheticRolePublic
@@ -784,6 +812,87 @@ func (s *Service) createGrant(ctx context.Context, grant Grant) error {
 	return s.permissions.CreateGrant(ctx, grant)
 }
 
+// CreateGrants writes multiple grants, using a store bulk path when available.
+func (s *Service) CreateGrants(ctx context.Context, grants []Grant) error {
+	if len(grants) == 0 {
+		return nil
+	}
+
+	validated := make([]Grant, 0, len(grants))
+	for _, grant := range grants {
+		if grant.OwnerID == "" {
+			return fmt.Errorf("owner ID is required")
+		}
+		if grant.PermissionName == "" {
+			return fmt.Errorf("permission name is required")
+		}
+		if grant.TeamScope == "" {
+			return fmt.Errorf("team scope is required")
+		}
+		validated = append(validated, cloneGrant(grant))
+	}
+
+	if bulkStore, ok := s.permissions.(BulkGrantStore); ok {
+		return bulkStore.CreateGrants(ctx, validated)
+	}
+
+	for _, grant := range validated {
+		if err := s.permissions.CreateGrant(ctx, grant); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// EnsureGrantsForOwners ensures each provided grant exists once and writes missing grants in bulk when supported.
+func (s *Service) EnsureGrantsForOwners(ctx context.Context, grants []Grant) error {
+	if len(grants) == 0 {
+		return nil
+	}
+
+	missing := make([]Grant, 0, len(grants))
+	now := time.Now().UTC()
+	for _, grant := range grants {
+		if grant.OwnerID == "" {
+			return fmt.Errorf("owner ID is required")
+		}
+		if grant.PermissionName == "" {
+			return fmt.Errorf("permission name is required")
+		}
+		if grant.TeamScope == "" {
+			return fmt.Errorf("team scope is required")
+		}
+
+		principal := PrincipalRef{Kind: grant.OwnerKind, ID: grant.OwnerID}
+		if err := principal.Validate(); err != nil {
+			return err
+		}
+
+		existing, err := s.permissions.GrantsForPrincipal(ctx, principal)
+		if err != nil {
+			return err
+		}
+
+		exists := false
+		for _, current := range existing {
+			if current.IsExpiredAt(now) {
+				continue
+			}
+			if grantsEquivalent(current, grant) {
+				exists = true
+				break
+			}
+		}
+
+		if !exists {
+			missing = append(missing, cloneGrant(grant))
+		}
+	}
+
+	return s.CreateGrants(ctx, missing)
+}
+
 // EnsureSyntheticRoles ensures configured synthetic roles exist without overwriting existing definitions.
 func (s *Service) EnsureSyntheticRoles(ctx context.Context) error {
 	roles := []Role{}
@@ -855,6 +964,7 @@ func (s *Service) SaveBuiltIns(ctx context.Context, grants []Grant) error {
 	}
 
 	allowedRoleIDs := s.syntheticRoleIDSet()
+	eligible := make([]Grant, 0, len(grants))
 	for _, grant := range grants {
 		if grant.OwnerKind != PrincipalRole {
 			return fmt.Errorf("save built-ins only supports role-owned grants")
@@ -862,9 +972,11 @@ func (s *Service) SaveBuiltIns(ctx context.Context, grants []Grant) error {
 		if !allowedRoleIDs[grant.OwnerID] {
 			return fmt.Errorf("grant owner %q is not a configured synthetic role", grant.OwnerID)
 		}
-		if err := s.EnsureGrantForOwner(ctx, grant); err != nil {
-			return err
-		}
+		eligible = append(eligible, grant)
+	}
+
+	if err := s.EnsureGrantsForOwners(ctx, eligible); err != nil {
+		return err
 	}
 
 	return nil

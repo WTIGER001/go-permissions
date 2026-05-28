@@ -226,6 +226,30 @@ func (s *bootstrapStore) CreateGrant(_ context.Context, grant Grant) error {
 	return nil
 }
 
+func (s *bootstrapStore) CreateGrants(_ context.Context, grants []Grant) error {
+	if len(grants) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, grant := range grants {
+		if grant.OwnerID == "" {
+			return fmt.Errorf("owner ID is required")
+		}
+		if grant.PermissionName == "" {
+			return fmt.Errorf("permission name is required")
+		}
+		if grant.TeamScope == "" {
+			return fmt.Errorf("team scope is required")
+		}
+		s.grants = append(s.grants, cloneGrant(grant))
+	}
+
+	return nil
+}
+
 func (s *bootstrapStore) PrincipalsWithGrant(_ context.Context, req Request) ([]PrincipalHit, error) {
 	if req.Perm == "" {
 		return nil, fmt.Errorf("permission name is required")

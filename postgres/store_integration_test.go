@@ -152,3 +152,37 @@ func TestListPrincipalsWithGrant_DenyOverridesAllow(t *testing.T) {
 		t.Fatalf("expected %v, got %v", expected, got)
 	}
 }
+
+func TestCreateGrants_BulkInsert(t *testing.T) {
+	store, pool := newTestStore(t)
+	ctx := context.Background()
+
+	grants := []permissions.Grant{
+		{
+			OwnerKind:      permissions.PrincipalUser,
+			OwnerID:        "u-1",
+			Effect:         permissions.EffectAllow,
+			TeamScope:      "*",
+			PermissionName: "announcements.read",
+		},
+		{
+			OwnerKind:      permissions.PrincipalUser,
+			OwnerID:        "u-2",
+			Effect:         permissions.EffectAllow,
+			TeamScope:      "*",
+			PermissionName: "announcements.read",
+		},
+	}
+
+	if err := store.CreateGrants(ctx, grants); err != nil {
+		t.Fatalf("CreateGrants: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "select count(*) from permission_grants where permission_name = 'announcements.read'").Scan(&count); err != nil {
+		t.Fatalf("count permission grants: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 inserted grants, got %d", count)
+	}
+}

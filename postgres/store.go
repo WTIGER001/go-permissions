@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wtiger001/go-permissions"
@@ -15,6 +16,7 @@ type Store struct {
 }
 
 var _ permissions.PermissionStore = (*Store)(nil)
+var _ permissions.BulkGrantStore = (*Store)(nil)
 
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
@@ -575,6 +577,85 @@ insert into permission_grants (
 		variableSpecRaw,
 	); err != nil {
 		return fmt.Errorf("insert permission grant: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Store) CreateGrants(ctx context.Context, grants []permissions.Grant) error {
+	if len(grants) == 0 {
+		return nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin grant transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	const stmt = `
+insert into permission_grants (
+	owner_kind,
+	owner_id,
+	effect,
+	team_scope,
+	object_scope,
+	permission_name,
+	expires_at,
+	field_allowlist,
+	variable_spec
+) values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+`
+
+	batch := &pgx.Batch{}
+	for _, grant := range grants {
+		if grant.OwnerID == "" {
+			return fmt.Errorf("owner ID is required")
+		}
+		if grant.PermissionName == "" {
+			return fmt.Errorf("permission name is required")
+		}
+		if grant.TeamScope == "" {
+			return fmt.Errorf("team scope is required")
+		}
+
+		variableSpec := map[string]any{}
+		for k, v := range grant.VariableSpec {
+			variableSpec[k] = v
+		}
+
+		variableSpecRaw, err := json.Marshal(variableSpec)
+		if err != nil {
+			return fmt.Errorf("marshal variable spec: %w", err)
+		}
+
+		batch.Queue(
+			stmt,
+			string(grant.OwnerKind),
+			grant.OwnerID,
+			string(grant.Effect),
+			grant.TeamScope,
+			grant.ObjectScope,
+			grant.PermissionName,
+			grant.ExpiresAt,
+			grant.RestrictedFields,
+			variableSpecRaw,
+		)
+	}
+
+	results := tx.SendBatch(ctx, batch)
+	for i := 0; i < len(grants); i++ {
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
+			return fmt.Errorf("insert permission grants: %w", err)
+		}
+	}
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("close permission grant batch: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit grant transaction: %w", err)
 	}
 
 	return nil

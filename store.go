@@ -22,3 +22,9 @@ type PermissionStore interface {
 	PrincipalsWithGrant(ctx context.Context, req Request) ([]PrincipalHit, error)
 	ExpandRoles(ctx context.Context, roleIDs []string) ([]string, error)
 }
+
+// BulkGrantStore is an optional extension for stores that can write many grants efficiently.
+// Service methods can detect this interface and use transactional/batched inserts.
+type BulkGrantStore interface {
+	CreateGrants(ctx context.Context, grants []Grant) error
+}

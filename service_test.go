@@ -20,9 +20,11 @@ type mockStore struct {
 	grants          []Grant
 	principalHits   []PrincipalHit
 	writtenGrants   []Grant
+	bulkWritten     []Grant
 	assignedRoles   []RoleAssignment
 	identityErr     error
 	err             error
+	disableBulk     bool
 }
 
 func (m *mockStore) GetUserGroups(_ context.Context, _ string) ([]string, error) {
@@ -132,6 +134,17 @@ func (m *mockStore) ListPrincipalsWithGrant(_ context.Context, _ Request) ([]Pri
 func (m *mockStore) CreateGrant(_ context.Context, grant Grant) error {
 	m.writtenGrants = append(m.writtenGrants, grant)
 	m.grants = append(m.grants, grant)
+	return m.err
+}
+
+func (m *mockStore) CreateGrants(_ context.Context, grants []Grant) error {
+	if m.disableBulk {
+		return fmt.Errorf("bulk disabled")
+	}
+	for _, grant := range grants {
+		m.bulkWritten = append(m.bulkWritten, grant)
+		m.grants = append(m.grants, grant)
+	}
 	return m.err
 }
 
@@ -718,8 +731,8 @@ func TestSaveBuiltIns_IdempotentForConfiguredSyntheticRoles(t *testing.T) {
 	if len(store.rolesByID) != 3 {
 		t.Fatalf("expected 3 synthetic roles, got %d", len(store.rolesByID))
 	}
-	if len(store.writtenGrants) != 3 {
-		t.Fatalf("expected exactly 3 grant writes after idempotent save, got %d", len(store.writtenGrants))
+	if len(store.bulkWritten) != 3 {
+		t.Fatalf("expected exactly 3 grant writes after idempotent save, got %d", len(store.bulkWritten))
 	}
 }
 
@@ -774,8 +787,8 @@ func TestSetStore_TriggersSaveBuiltIns(t *testing.T) {
 	if _, ok := targetStore.rolesByID[SyntheticRolePublic]; !ok {
 		t.Fatalf("expected synthetic public role to be created in new store")
 	}
-	if len(targetStore.writtenGrants) != 1 {
-		t.Fatalf("expected 1 built-in grant write, got %d", len(targetStore.writtenGrants))
+	if len(targetStore.bulkWritten) != 1 {
+		t.Fatalf("expected 1 built-in grant write, got %d", len(targetStore.bulkWritten))
 	}
 }
 
@@ -830,4 +843,115 @@ func TestAddDefaultGrant_ValidatesInputs(t *testing.T) {
 		}()
 		svc.AddDefaultGrant(SyntheticRolePublic, "", "*")
 	})
+}
+
+func TestAddDefaultSystemCRUDGrants_AppendsAllPermissions(t *testing.T) {
+	svc := New()
+	crud := NewSystemCRUDPermissions("announcements.announcement")
+
+	svc.AddDefaultSystemCRUDGrants(SyntheticRoleAdmin, "*", crud)
+
+	if len(svc.builtInGrants) != 5 {
+		t.Fatalf("expected 5 built-in grants, got %d", len(svc.builtInGrants))
+	}
+}
+
+func TestAddDefaultTeamCRUDGrants_AppendsAllPermissions(t *testing.T) {
+	svc := New()
+	crud := NewTeamCRUDPermissions("announcements.teamannouncement")
+
+	svc.AddDefaultTeamCRUDGrants(SyntheticRoleAdmin, "*", crud)
+
+	if len(svc.builtInGrants) != 5 {
+		t.Fatalf("expected 5 built-in grants, got %d", len(svc.builtInGrants))
+	}
+}
+
+func TestAddDefaultCRUDGrant_ValidatesAction(t *testing.T) {
+	svc := New()
+
+	svc.AddDefaultCRUDGrant(SyntheticRoleAdmin, "*", CRUDRead, "announcements.read")
+	if len(svc.builtInGrants) != 1 {
+		t.Fatalf("expected 1 built-in grant, got %d", len(svc.builtInGrants))
+	}
+
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("expected panic for invalid CRUD action")
+		}
+	}()
+
+	svc.AddDefaultCRUDGrant(SyntheticRoleAdmin, "*", CRUDAction("invalid"), "announcements.invalid")
+}
+
+func TestCreateGrants_UsesBulkStoreWhenAvailable(t *testing.T) {
+	store := &mockStore{}
+	svc := NewServiceWithProviders(store, store)
+
+	err := svc.CreateGrants(context.Background(), []Grant{{
+		OwnerKind:      PrincipalRole,
+		OwnerID:        SyntheticRoleAdmin,
+		Effect:         EffectAllow,
+		TeamScope:      "*",
+		PermissionName: "announcements.read",
+	}})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(store.bulkWritten) != 1 {
+		t.Fatalf("expected 1 bulk grant write, got %d", len(store.bulkWritten))
+	}
+	if len(store.writtenGrants) != 0 {
+		t.Fatalf("expected no single grant writes when bulk path is used")
+	}
+}
+
+func TestEnsureGrantsForOwners_WritesOnlyMissing(t *testing.T) {
+	existing := Grant{
+		OwnerKind:      PrincipalRole,
+		OwnerID:        SyntheticRoleAdmin,
+		Effect:         EffectAllow,
+		TeamScope:      "*",
+		PermissionName: "announcements.read",
+	}
+	missing := Grant{
+		OwnerKind:      PrincipalRole,
+		OwnerID:        SyntheticRoleAdmin,
+		Effect:         EffectAllow,
+		TeamScope:      "*",
+		PermissionName: "announcements.update",
+	}
+
+	store := &mockStore{grants: []Grant{existing}}
+	svc := NewServiceWithProviders(store, store)
+
+	err := svc.EnsureGrantsForOwners(context.Background(), []Grant{existing, missing})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(store.bulkWritten) != 1 {
+		t.Fatalf("expected 1 missing grant write, got %d", len(store.bulkWritten))
+	}
+	if store.bulkWritten[0].PermissionName != "announcements.update" {
+		t.Fatalf("expected update permission to be written, got %q", store.bulkWritten[0].PermissionName)
+	}
+}
+
+func TestSaveBuiltIns_UsesBulkEnsurePath(t *testing.T) {
+	store := &mockStore{}
+	svc := NewServiceWithProviders(store, store)
+
+	err := svc.SaveBuiltIns(context.Background(), []Grant{{
+		OwnerKind:      PrincipalRole,
+		OwnerID:        SyntheticRolePublic,
+		Effect:         EffectAllow,
+		TeamScope:      "*",
+		PermissionName: "assets.read",
+	}})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(store.bulkWritten) != 1 {
+		t.Fatalf("expected built-ins to be written through bulk path")
+	}
 }

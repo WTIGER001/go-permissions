@@ -61,15 +61,16 @@ func (s *Service) SetBuiltInGrants(grants []Grant) {
 }
 
 // AddDefaultGrant appends an allow grant to built-in defaults and deduplicates equivalent entries.
-func (s *Service) AddDefaultGrant(roleID, permission, teamScope string) error {
+// Invalid input indicates a programming error and triggers panic.
+func (s *Service) AddDefaultGrant(roleID, permission, teamScope string) {
 	roleID = strings.TrimSpace(roleID)
 	permission = strings.TrimSpace(permission)
 	teamScope = strings.TrimSpace(teamScope)
 	if roleID == "" {
-		return fmt.Errorf("role ID is required")
+		panic("role ID is required")
 	}
 	if permission == "" {
-		return fmt.Errorf("permission name is required")
+		panic("permission name is required")
 	}
 	if teamScope == "" {
 		teamScope = "*"
@@ -85,12 +86,11 @@ func (s *Service) AddDefaultGrant(roleID, permission, teamScope string) error {
 
 	for _, existing := range s.builtInGrants {
 		if grantsEquivalent(existing, grant) {
-			return nil
+			return
 		}
 	}
 
 	s.builtInGrants = append(s.builtInGrants, grant)
-	return nil
 }
 
 func (s *Service) applyDefaultSyntheticRoleIDs() {

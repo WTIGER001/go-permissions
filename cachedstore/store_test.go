@@ -20,6 +20,9 @@ type countingStore struct {
 	principalsWithGrantCalls int
 	roleAssignWriteCalls     int
 	grantWriteCalls          int
+	createRoleCalls          int
+	updateRoleCalls          int
+	deleteRoleCalls          int
 }
 
 func (s *countingStore) RoleDefinitions(_ context.Context) ([]permissions.Role, error) {
@@ -85,9 +88,26 @@ func (s *countingStore) AssignRole(_ context.Context, _ permissions.PrincipalRef
 	return nil
 }
 
-func (s *countingStore) CreateRole(_ context.Context, _ permissions.Role) error { return nil }
-func (s *countingStore) UpdateRole(_ context.Context, _ permissions.Role) error { return nil }
-func (s *countingStore) DeleteRole(_ context.Context, _ string) error           { return nil }
+func (s *countingStore) CreateRole(_ context.Context, _ permissions.Role) error {
+	s.mu.Lock()
+	s.createRoleCalls++
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *countingStore) UpdateRole(_ context.Context, _ permissions.Role) error {
+	s.mu.Lock()
+	s.updateRoleCalls++
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *countingStore) DeleteRole(_ context.Context, _ string) error {
+	s.mu.Lock()
+	s.deleteRoleCalls++
+	s.mu.Unlock()
+	return nil
+}
 
 func TestStore_CachesReadResults(t *testing.T) {
 	base := &countingStore{}
@@ -220,5 +240,47 @@ func TestStore_TTLExpiry(t *testing.T) {
 	}
 	if base.roleAssignmentsCalls != 2 {
 		t.Fatalf("expected backend call after TTL expiry, got %d", base.roleAssignmentsCalls)
+	}
+}
+
+func TestStore_NewStoreDefaultTTL(t *testing.T) {
+	base := &countingStore{}
+	store := NewStore(base)
+	if store.TTL() != DefaultTTL {
+		t.Fatalf("expected default TTL %v, got %v", DefaultTTL, store.TTL())
+	}
+}
+
+func TestStore_RoleWritesInvalidateCache(t *testing.T) {
+	base := &countingStore{}
+	store := NewStoreWithTTL(base, time.Minute)
+	ctx := context.Background()
+
+	if _, err := store.RoleDefinitions(ctx); err != nil {
+		t.Fatalf("prime cache failed: %v", err)
+	}
+	if _, err := store.RoleDefinitions(ctx); err != nil {
+		t.Fatalf("cache hit failed: %v", err)
+	}
+
+	if err := store.CreateRole(ctx, permissions.Role{ID: "r-2", Name: "role-2"}); err != nil {
+		t.Fatalf("create role failed: %v", err)
+	}
+	if err := store.UpdateRole(ctx, permissions.Role{ID: "r-2", Name: "role-2"}); err != nil {
+		t.Fatalf("update role failed: %v", err)
+	}
+	if err := store.DeleteRole(ctx, "r-2"); err != nil {
+		t.Fatalf("delete role failed: %v", err)
+	}
+
+	if _, err := store.RoleDefinitions(ctx); err != nil {
+		t.Fatalf("post-invalidation read failed: %v", err)
+	}
+
+	if base.createRoleCalls != 1 || base.updateRoleCalls != 1 || base.deleteRoleCalls != 1 {
+		t.Fatalf("expected one create/update/delete role call, got create=%d update=%d delete=%d", base.createRoleCalls, base.updateRoleCalls, base.deleteRoleCalls)
+	}
+	if base.roleDefinitionsCalls != 2 {
+		t.Fatalf("expected cache flush to force second backend read, got %d", base.roleDefinitionsCalls)
 	}
 }

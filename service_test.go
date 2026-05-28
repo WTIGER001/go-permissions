@@ -795,12 +795,8 @@ func TestNew_DefaultsSyntheticRoleIDs(t *testing.T) {
 func TestAddDefaultGrant_AppendsAndDeduplicates(t *testing.T) {
 	svc := New()
 
-	if err := svc.AddDefaultGrant(SyntheticRolePublic, "assets.read", ""); err != nil {
-		t.Fatalf("expected no error adding default grant, got %v", err)
-	}
-	if err := svc.AddDefaultGrant(SyntheticRolePublic, "assets.read", "*"); err != nil {
-		t.Fatalf("expected no error adding duplicate default grant, got %v", err)
-	}
+	svc.AddDefaultGrant(SyntheticRolePublic, "assets.read", "")
+	svc.AddDefaultGrant(SyntheticRolePublic, "assets.read", "*")
 
 	if len(svc.builtInGrants) != 1 {
 		t.Fatalf("expected a single deduplicated built-in grant, got %d", len(svc.builtInGrants))
@@ -815,12 +811,23 @@ func TestAddDefaultGrant_AppendsAndDeduplicates(t *testing.T) {
 }
 
 func TestAddDefaultGrant_ValidatesInputs(t *testing.T) {
-	svc := New()
+	t.Run("missing role id panics", func(t *testing.T) {
+		svc := New()
+		defer func() {
+			if recover() == nil {
+				t.Fatalf("expected panic for missing role ID")
+			}
+		}()
+		svc.AddDefaultGrant("", "assets.read", "*")
+	})
 
-	if err := svc.AddDefaultGrant("", "assets.read", "*"); err == nil {
-		t.Fatalf("expected role ID validation error")
-	}
-	if err := svc.AddDefaultGrant(SyntheticRolePublic, "", "*"); err == nil {
-		t.Fatalf("expected permission validation error")
-	}
+	t.Run("missing permission panics", func(t *testing.T) {
+		svc := New()
+		defer func() {
+			if recover() == nil {
+				t.Fatalf("expected panic for missing permission")
+			}
+		}()
+		svc.AddDefaultGrant(SyntheticRolePublic, "", "*")
+	})
 }

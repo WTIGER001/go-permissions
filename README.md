@@ -67,21 +67,18 @@ ctx := context.Background()
 
 svc := permissions.New()
 svc.SetIdentityProvider(identityAdapter)
-svc.SetSyntheticRoleIDs(
-	permissions.SyntheticRolePublic,
-	permissions.SyntheticRoleAuthenticated,
-	permissions.SyntheticRoleAdmin,
-)
+
+// Synthetic role IDs default to:
+// - permissions.SyntheticRolePublic
+// - permissions.SyntheticRoleAuthenticated
+// - permissions.SyntheticRoleAdmin
+// Override only if you need custom IDs.
+// svc.SetSyntheticRoleIDs("custom.public", "custom.authenticated", "custom.admin")
+
 svc.SetAdminGroupID("group.admins")
-svc.SetBuiltInGrants([]permissions.Grant{
-	{
-		OwnerKind:      permissions.PrincipalRole,
-		OwnerID:        permissions.SyntheticRolePublic,
-		Effect:         permissions.EffectAllow,
-		TeamScope:      "*",
-		PermissionName: "assets.read",
-	},
-})
+_ = svc.AddDefaultGrant(permissions.SyntheticRolePublic, "assets.read", "*")
+_ = svc.AddDefaultGrant(permissions.SyntheticRoleAuthenticated, "profile.read", "*")
+_ = svc.AddDefaultGrant(permissions.SyntheticRoleAdmin, "admin.read", "*")
 
 // SetStore automatically calls SaveBuiltIns with the configured built-in grants.
 if err := svc.SetStore(postgresStore); err != nil {

@@ -22,7 +22,9 @@ type Service struct {
 
 // New creates a service with a nil identity provider and an in-memory default store.
 func New() *Service {
-	return &Service{permissions: newBootstrapStore()}
+	service := &Service{permissions: newBootstrapStore()}
+	service.applyDefaultSyntheticRoleIDs()
+	return service
 }
 
 // NewService wires the service to a permission store and identity provider.
@@ -30,10 +32,12 @@ func NewService(permissionStore PermissionStore, identityProvider IdentityProvid
 	if permissionStore == nil {
 		permissionStore = newBootstrapStore()
 	}
-	return &Service{
+	service := &Service{
 		identity:    identityProvider,
 		permissions: permissionStore,
 	}
+	service.applyDefaultSyntheticRoleIDs()
+	return service
 }
 
 // SetIdentityProvider updates the identity provider used by permission checks.
@@ -54,6 +58,51 @@ func (s *Service) SetStore(store PermissionStore) error {
 // SetBuiltInGrants configures built-in grants used by SaveBuiltIns and SetStore bootstrap.
 func (s *Service) SetBuiltInGrants(grants []Grant) {
 	s.builtInGrants = cloneGrantSlice(grants)
+}
+
+// AddDefaultGrant appends an allow grant to built-in defaults and deduplicates equivalent entries.
+func (s *Service) AddDefaultGrant(roleID, permission, teamScope string) error {
+	roleID = strings.TrimSpace(roleID)
+	permission = strings.TrimSpace(permission)
+	teamScope = strings.TrimSpace(teamScope)
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+	if permission == "" {
+		return fmt.Errorf("permission name is required")
+	}
+	if teamScope == "" {
+		teamScope = "*"
+	}
+
+	grant := Grant{
+		OwnerKind:      PrincipalRole,
+		OwnerID:        roleID,
+		Effect:         EffectAllow,
+		TeamScope:      teamScope,
+		PermissionName: permission,
+	}
+
+	for _, existing := range s.builtInGrants {
+		if grantsEquivalent(existing, grant) {
+			return nil
+		}
+	}
+
+	s.builtInGrants = append(s.builtInGrants, grant)
+	return nil
+}
+
+func (s *Service) applyDefaultSyntheticRoleIDs() {
+	if strings.TrimSpace(s.publicRoleID) == "" {
+		s.publicRoleID = SyntheticRolePublic
+	}
+	if strings.TrimSpace(s.authenticatedRoleID) == "" {
+		s.authenticatedRoleID = SyntheticRoleAuthenticated
+	}
+	if strings.TrimSpace(s.adminRoleID) == "" {
+		s.adminRoleID = SyntheticRoleAdmin
+	}
 }
 
 // SetPublicRoleID configures the synthetic role applied to anonymous requests.

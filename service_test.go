@@ -778,3 +778,49 @@ func TestSetStore_TriggersSaveBuiltIns(t *testing.T) {
 		t.Fatalf("expected 1 built-in grant write, got %d", len(targetStore.writtenGrants))
 	}
 }
+
+func TestNew_DefaultsSyntheticRoleIDs(t *testing.T) {
+	svc := New()
+	if svc.publicRoleID != SyntheticRolePublic {
+		t.Fatalf("expected default public role ID %q, got %q", SyntheticRolePublic, svc.publicRoleID)
+	}
+	if svc.authenticatedRoleID != SyntheticRoleAuthenticated {
+		t.Fatalf("expected default authenticated role ID %q, got %q", SyntheticRoleAuthenticated, svc.authenticatedRoleID)
+	}
+	if svc.adminRoleID != SyntheticRoleAdmin {
+		t.Fatalf("expected default admin role ID %q, got %q", SyntheticRoleAdmin, svc.adminRoleID)
+	}
+}
+
+func TestAddDefaultGrant_AppendsAndDeduplicates(t *testing.T) {
+	svc := New()
+
+	if err := svc.AddDefaultGrant(SyntheticRolePublic, "assets.read", ""); err != nil {
+		t.Fatalf("expected no error adding default grant, got %v", err)
+	}
+	if err := svc.AddDefaultGrant(SyntheticRolePublic, "assets.read", "*"); err != nil {
+		t.Fatalf("expected no error adding duplicate default grant, got %v", err)
+	}
+
+	if len(svc.builtInGrants) != 1 {
+		t.Fatalf("expected a single deduplicated built-in grant, got %d", len(svc.builtInGrants))
+	}
+	grant := svc.builtInGrants[0]
+	if grant.OwnerKind != PrincipalRole || grant.OwnerID != SyntheticRolePublic {
+		t.Fatalf("unexpected grant owner %+v", grant)
+	}
+	if grant.Effect != EffectAllow || grant.TeamScope != "*" || grant.PermissionName != "assets.read" {
+		t.Fatalf("unexpected grant payload %+v", grant)
+	}
+}
+
+func TestAddDefaultGrant_ValidatesInputs(t *testing.T) {
+	svc := New()
+
+	if err := svc.AddDefaultGrant("", "assets.read", "*"); err == nil {
+		t.Fatalf("expected role ID validation error")
+	}
+	if err := svc.AddDefaultGrant(SyntheticRolePublic, "", "*"); err == nil {
+		t.Fatalf("expected permission validation error")
+	}
+}

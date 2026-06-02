@@ -175,6 +175,7 @@ func (m *mockStore) CreateRole(_ context.Context, role Role) error {
 }
 func (m *mockStore) UpdateRole(_ context.Context, _ Role) error   { return m.err }
 func (m *mockStore) DeleteRole(_ context.Context, _ string) error { return m.err }
+func (m *mockStore) AddRoleInheritance(_ context.Context, _, _ string) error { return m.err }
 
 func TestHasPermission_DenyOverridesAllow(t *testing.T) {
 	teamID := int64(42)
@@ -953,5 +954,145 @@ func TestSaveBuiltIns_UsesBulkEnsurePath(t *testing.T) {
 	}
 	if len(store.bulkWritten) != 1 {
 		t.Fatalf("expected built-ins to be written through bulk path")
+	}
+}
+
+func TestHasPermission_MultiTenantRole_BothTeamsAllowed(t *testing.T) {
+	team42 := int64(42)
+	team99 := int64(99)
+
+	store := &mockStore{
+		roleAssignments: []RoleAssignment{
+			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 42}},
+			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 99}},
+		},
+		grants: []Grant{
+			{
+				OwnerKind:      PrincipalRole,
+				OwnerID:        "r-viewer",
+				Effect:         EffectAllow,
+				TeamScope:      "?team",
+				PermissionName: "billing.read",
+				VariableSpec:   map[string]any{"team": "required"},
+			},
+		},
+	}
+
+	svc := NewServiceWithProviders(store, store)
+
+	allowed, err := svc.HasPermission(context.Background(), Request{
+		UserID: "u-1",
+		TeamID: &team42,
+		Perm:   "billing.read",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !allowed {
+		t.Fatalf("expected team 42 to be allowed")
+	}
+
+	allowed, err = svc.HasPermission(context.Background(), Request{
+		UserID: "u-1",
+		TeamID: &team99,
+		Perm:   "billing.read",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !allowed {
+		t.Fatalf("expected team 99 to be allowed")
+	}
+}
+
+func TestHasPermission_MultiTenantRole_DenyInOneTeam(t *testing.T) {
+	team42 := int64(42)
+	team99 := int64(99)
+
+	store := &mockStore{
+		roleAssignments: []RoleAssignment{
+			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 42}},
+			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 99}},
+		},
+		grants: []Grant{
+			{
+				OwnerKind:      PrincipalRole,
+				OwnerID:        "r-viewer",
+				Effect:         EffectAllow,
+				TeamScope:      "?team",
+				PermissionName: "billing.read",
+				VariableSpec:   map[string]any{"team": "required"},
+			},
+			{
+				OwnerKind:      PrincipalRole,
+				OwnerID:        "r-viewer",
+				Effect:         EffectDeny,
+				TeamScope:      "99",
+				PermissionName: "billing.read",
+			},
+		},
+	}
+
+	svc := NewServiceWithProviders(store, store)
+
+	allowed, err := svc.HasPermission(context.Background(), Request{
+		UserID: "u-1",
+		TeamID: &team42,
+		Perm:   "billing.read",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !allowed {
+		t.Fatalf("expected team 42 to be allowed")
+	}
+
+	allowed, err = svc.HasPermission(context.Background(), Request{
+		UserID: "u-1",
+		TeamID: &team99,
+		Perm:   "billing.read",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if allowed {
+		t.Fatalf("expected team 99 to be denied due to explicit deny grant")
+	}
+}
+
+func TestEffectivePermissions_MultiTenantRole(t *testing.T) {
+	team42 := int64(42)
+
+	store := &mockStore{
+		roleAssignments: []RoleAssignment{
+			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 42}},
+			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 99}},
+		},
+		grants: []Grant{
+			{
+				OwnerKind:      PrincipalRole,
+				OwnerID:        "r-viewer",
+				Effect:         EffectAllow,
+				TeamScope:      "?team",
+				PermissionName: "billing.read",
+				VariableSpec:   map[string]any{"team": "required"},
+			},
+		},
+	}
+
+	svc := NewServiceWithProviders(store, store)
+
+	eff, err := svc.EffectivePermissions(context.Background(), "u-1", &team42)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// For teamID = 42, we expect only the grant resolved for team 42 to be present.
+	// The grant resolved for team 99 does not match teamID = 42 scope.
+	if len(eff) != 1 {
+		t.Fatalf("expected exactly 1 effective permission, got %d", len(eff))
+	}
+	if eff[0].TeamScope != "42" {
+		t.Fatalf("expected team scope 42, got %q", eff[0].TeamScope)
 	}
 }

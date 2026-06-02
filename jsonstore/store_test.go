@@ -89,3 +89,46 @@ func TestJSONStore_ListPrincipalsWithGrant_DenyOverridesAllow(t *testing.T) {
 		t.Fatalf("expected %v, got %v", expected, got)
 	}
 }
+
+func TestJSONStore_TransitiveRoleInheritance(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "permissions.json")
+
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	// Build r-top -> r-mid -> r-leaf.
+	if err := store.AddRoleInheritance(ctx, "r-top", "r-mid"); err != nil {
+		t.Fatalf("AddRoleInheritance r-top->r-mid: %v", err)
+	}
+	if err := store.AddRoleInheritance(ctx, "r-mid", "r-leaf"); err != nil {
+		t.Fatalf("AddRoleInheritance r-mid->r-leaf: %v", err)
+	}
+
+	// ExpandRoles from r-top should return r-top, r-mid, r-leaf.
+	expanded, err := store.ExpandRoles(ctx, []string{"r-top"})
+	if err != nil {
+		t.Fatalf("ExpandRoles: %v", err)
+	}
+	sort.Strings(expanded)
+	want := []string{"r-leaf", "r-mid", "r-top"}
+	if !reflect.DeepEqual(expanded, want) {
+		t.Fatalf("expected expanded roles %v, got %v", want, expanded)
+	}
+
+	// Reload from disk and verify the expansion is still correct.
+	reloaded, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("reload store: %v", err)
+	}
+	expanded2, err := reloaded.ExpandRoles(ctx, []string{"r-top"})
+	if err != nil {
+		t.Fatalf("ExpandRoles after reload: %v", err)
+	}
+	sort.Strings(expanded2)
+	if !reflect.DeepEqual(expanded2, want) {
+		t.Fatalf("after reload: expected %v, got %v", want, expanded2)
+	}
+}

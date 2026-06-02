@@ -1153,3 +1153,11 @@ Recommended semantics:
 #### WithFields([]string)
 
 Restricts readable or writable fields for this permission.
+
+
+## Thoughts to Resolve
+
+- Multiple Scopes... not just user and team. Maybe variable... 
+- How to handle policy based permissions
+- Default Role pattern
+- Func Receiver to filter? 

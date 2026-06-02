@@ -231,3 +231,89 @@ func TestBootstrapStore_ExpandRolesAndHelpers(t *testing.T) {
 		t.Fatalf("cloneGrant should deep copy variable spec")
 	}
 }
+
+func TestBootstrapStore_TransitiveRoleInheritance(t *testing.T) {
+	ctx := context.Background()
+	s := newBootstrapStore()
+
+	// 3-hop chain: r-top -> r-mid -> r-leaf
+	if err := s.AddRoleInheritance(ctx, "r-top", "r-mid"); err != nil {
+		t.Fatalf("AddRoleInheritance r-top->r-mid: %v", err)
+	}
+	if err := s.AddRoleInheritance(ctx, "r-mid", "r-leaf"); err != nil {
+		t.Fatalf("AddRoleInheritance r-mid->r-leaf: %v", err)
+	}
+
+	expanded, err := s.ExpandRoles(ctx, []string{"r-top"})
+	if err != nil {
+		t.Fatalf("ExpandRoles: %v", err)
+	}
+	sort.Strings(expanded)
+	want := []string{"r-leaf", "r-mid", "r-top"}
+	if !reflect.DeepEqual(expanded, want) {
+		t.Fatalf("expected %v, got %v", want, expanded)
+	}
+}
+
+func TestBootstrapStore_AddRoleInheritance_Idempotent(t *testing.T) {
+	ctx := context.Background()
+	s := newBootstrapStore()
+
+	if err := s.AddRoleInheritance(ctx, "r-a", "r-b"); err != nil {
+		t.Fatalf("first AddRoleInheritance: %v", err)
+	}
+	if err := s.AddRoleInheritance(ctx, "r-a", "r-b"); err != nil {
+		t.Fatalf("second AddRoleInheritance (idempotent): %v", err)
+	}
+
+	expanded, err := s.ExpandRoles(ctx, []string{"r-a"})
+	if err != nil {
+		t.Fatalf("ExpandRoles: %v", err)
+	}
+	sort.Strings(expanded)
+	if len(expanded) != 2 {
+		t.Fatalf("expected 2 roles (no duplicate from idempotent call), got %v", expanded)
+	}
+}
+
+func TestBootstrapStore_AddRoleInheritance_SelfLoop(t *testing.T) {
+	ctx := context.Background()
+	s := newBootstrapStore()
+
+	if err := s.AddRoleInheritance(ctx, "r-1", "r-1"); err == nil {
+		t.Fatal("expected error for self-loop inheritance")
+	}
+}
+
+func TestBootstrapStore_AddRoleInheritance_Diamond(t *testing.T) {
+	ctx := context.Background()
+	s := newBootstrapStore()
+
+	//   r-top
+	//   /   \
+	// r-left  r-right
+	//   \   /
+	//  r-bottom
+	if err := s.AddRoleInheritance(ctx, "r-top", "r-left"); err != nil {
+		t.Fatalf("r-top->r-left: %v", err)
+	}
+	if err := s.AddRoleInheritance(ctx, "r-top", "r-right"); err != nil {
+		t.Fatalf("r-top->r-right: %v", err)
+	}
+	if err := s.AddRoleInheritance(ctx, "r-left", "r-bottom"); err != nil {
+		t.Fatalf("r-left->r-bottom: %v", err)
+	}
+	if err := s.AddRoleInheritance(ctx, "r-right", "r-bottom"); err != nil {
+		t.Fatalf("r-right->r-bottom: %v", err)
+	}
+
+	expanded, err := s.ExpandRoles(ctx, []string{"r-top"})
+	if err != nil {
+		t.Fatalf("ExpandRoles diamond: %v", err)
+	}
+	sort.Strings(expanded)
+	want := []string{"r-bottom", "r-left", "r-right", "r-top"}
+	if !reflect.DeepEqual(expanded, want) {
+		t.Fatalf("expected %v (diamond), got %v", want, expanded)
+	}
+}

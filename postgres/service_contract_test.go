@@ -180,6 +180,34 @@ func (s *postgresHarnessStore) SeedEffectivePermissions(ctx context.Context, t *
 	}
 }
 
+func (s *postgresHarnessStore) SeedTransitiveRoles(ctx context.Context, t *testing.T) permissions.Request {
+	t.Helper()
+	// Create three roles and build a 3-hop chain via AddRoleInheritance.
+	// Grant is only on r-leaf; the service must expand transitively to find it.
+	stmts := []string{
+		"insert into users (id, display_name) values ('u-1', 'User One')",
+		"insert into roles (id, code) values ('r-top', 'top')",
+		"insert into roles (id, code) values ('r-mid', 'mid')",
+		"insert into roles (id, code) values ('r-leaf', 'leaf')",
+		// Seed self-closure rows so that AddRoleInheritance can find ancestors.
+		"insert into role_closure (ancestor_role_id, descendant_role_id, depth) values ('r-top', 'r-top', 0)",
+		"insert into role_closure (ancestor_role_id, descendant_role_id, depth) values ('r-mid', 'r-mid', 0)",
+		"insert into role_closure (ancestor_role_id, descendant_role_id, depth) values ('r-leaf', 'r-leaf', 0)",
+		"insert into principal_roles (principal_kind, principal_id, role_id, binding_values) values ('user', 'u-1', 'r-top', '{}'::jsonb)",
+		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('role', 'r-leaf', 'allow', '*', null, 'reports.view', '{}'::jsonb)",
+	}
+	seedStatements(t, ctx, s.pool, stmts)
+
+	if err := s.AddRoleInheritance(ctx, "r-top", "r-mid"); err != nil {
+		t.Fatalf("AddRoleInheritance r-top->r-mid: %v", err)
+	}
+	if err := s.AddRoleInheritance(ctx, "r-mid", "r-leaf"); err != nil {
+		t.Fatalf("AddRoleInheritance r-mid->r-leaf: %v", err)
+	}
+
+	return permissions.Request{UserID: "u-1", TeamID: nil, Object: "reports", Perm: "reports.view"}
+}
+
 func seedDenyOverridesAllowScenario(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
 

@@ -12,7 +12,13 @@ import (
 type Store struct {
 	userRoleAssignments  map[string][]permissions.RoleAssignment
 	groupRoleAssignments map[string][]permissions.RoleAssignment
+	// roleExpansion holds the explicitly set expansion for testing convenience
+	// (legacy helper kept for direct test seeding; AddRoleInheritance is preferred).
 	roleExpansion        map[string][]string
+	// roleInheritance maps parent -> set of direct child role IDs.
+	roleInheritance      map[string]map[string]bool
+	// roleClosure maps ancestor -> set of all descendant role IDs (transitive).
+	roleClosure         map[string]map[string]bool
 	grants               []permissions.Grant
 }
 
@@ -23,6 +29,8 @@ func NewStore() *Store {
 		userRoleAssignments:  map[string][]permissions.RoleAssignment{},
 		groupRoleAssignments: map[string][]permissions.RoleAssignment{},
 		roleExpansion:        map[string][]string{},
+		roleInheritance:      map[string]map[string]bool{},
+		roleClosure:         map[string]map[string]bool{},
 		grants:               []permissions.Grant{},
 	}
 }
@@ -35,8 +43,58 @@ func (s *Store) AddGroupRoleAssignments(groupID string, assignments ...permissio
 	s.groupRoleAssignments[groupID] = append(s.groupRoleAssignments[groupID], assignments...)
 }
 
+// SetRoleExpansion is a legacy helper for direct test seeding of the expansion
+// map. Prefer AddRoleInheritance for transitive closure support.
 func (s *Store) SetRoleExpansion(roleID string, expandedRoleIDs ...string) {
 	s.roleExpansion[roleID] = append([]string(nil), expandedRoleIDs...)
+	// Mirror into closure so ExpandRoles stays consistent.
+	for _, child := range expandedRoleIDs {
+		_ = s.AddRoleInheritance(context.Background(), roleID, child) //nolint: errcheck - best-effort mirroring
+	}
+}
+
+// AddRoleInheritance declares that parentRoleID inherits all permissions of
+// childRoleID and recomputes the full transitive role closure.
+func (s *Store) AddRoleInheritance(_ context.Context, parentRoleID, childRoleID string) error {
+	if parentRoleID == "" {
+		return fmt.Errorf("parent role ID is required")
+	}
+	if childRoleID == "" {
+		return fmt.Errorf("child role ID is required")
+	}
+	if parentRoleID == childRoleID {
+		return fmt.Errorf("a role cannot inherit itself")
+	}
+
+	if s.roleInheritance[parentRoleID] == nil {
+		s.roleInheritance[parentRoleID] = map[string]bool{}
+	}
+	if s.roleInheritance[parentRoleID][childRoleID] {
+		return nil
+	}
+	s.roleInheritance[parentRoleID][childRoleID] = true
+
+	// Self-closure entries.
+	if s.roleClosure[parentRoleID] == nil {
+		s.roleClosure[parentRoleID] = map[string]bool{parentRoleID: true}
+	}
+	if s.roleClosure[childRoleID] == nil {
+		s.roleClosure[childRoleID] = map[string]bool{childRoleID: true}
+	}
+
+	newDescendants := s.roleClosure[childRoleID]
+	ancestors := []string{parentRoleID}
+	for ancestor, descendants := range s.roleClosure {
+		if descendants[parentRoleID] && ancestor != parentRoleID {
+			ancestors = append(ancestors, ancestor)
+		}
+	}
+	for _, ancestor := range ancestors {
+		for desc := range newDescendants {
+			s.roleClosure[ancestor][desc] = true
+		}
+	}
+	return nil
 }
 
 func (s *Store) AddGrants(grants ...permissions.Grant) {
@@ -90,14 +148,19 @@ func (s *Store) ExpandRoles(_ context.Context, roleIDs []string) ([]string, erro
 			seen[roleID] = true
 			expanded = append(expanded, roleID)
 		}
-
-		children := s.roleExpansion[roleID]
-		for _, child := range children {
-			if seen[child] {
-				continue
+		// Use the roleClosure table for fully transitive expansion.
+		for descendant := range s.roleClosure[roleID] {
+			if !seen[descendant] {
+				seen[descendant] = true
+				expanded = append(expanded, descendant)
 			}
-			seen[child] = true
-			expanded = append(expanded, child)
+		}
+		// Fallback: also honour legacy SetRoleExpansion entries.
+		for _, child := range s.roleExpansion[roleID] {
+			if !seen[child] {
+				seen[child] = true
+				expanded = append(expanded, child)
+			}
 		}
 	}
 

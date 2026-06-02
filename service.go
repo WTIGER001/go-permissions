@@ -342,64 +342,113 @@ func (s *Service) evaluatePermission(ctx context.Context, req Request, fieldPath
 		return false, err
 	}
 
-	bindingByRoleID := make(map[string]map[string]any, len(roleAssignments))
-
-	directRoleIDs := make([]string, 0, len(roleAssignments))
-	for _, assignment := range roleAssignments {
-		directRoleIDs = append(directRoleIDs, assignment.RoleID)
-		bindingByRoleID[assignment.RoleID] = assignment.BindingValues
-	}
-
-	roleIDs, err := s.permissions.ExpandRoles(ctx, directRoleIDs)
-	if err != nil {
-		return false, err
-	}
-
-	owners := make([]PrincipalRef, 0, 1+len(groupIDs)+len(roleIDs))
+	// Phase 1: evaluate grants for the user and their groups (no binding resolution needed).
+	unboundOwners := make([]PrincipalRef, 0, 1+len(groupIDs))
 	if req.UserID != "" {
-		owners = append(owners, PrincipalRef{Kind: PrincipalUser, ID: req.UserID})
+		unboundOwners = append(unboundOwners, PrincipalRef{Kind: PrincipalUser, ID: req.UserID})
 	}
 	for _, groupID := range groupIDs {
-		owners = append(owners, PrincipalRef{Kind: PrincipalGroup, ID: groupID})
-	}
-	for _, roleID := range roleIDs {
-		owners = append(owners, PrincipalRef{Kind: PrincipalRole, ID: roleID})
+		unboundOwners = append(unboundOwners, PrincipalRef{Kind: PrincipalGroup, ID: groupID})
 	}
 
-	grants, err := s.permissions.GrantsForOwners(ctx, owners, req)
-	if err != nil {
-		return false, err
-	}
-
-	allowed := false
-	for _, grant := range grants {
-		if grant.IsExpiredAt(now) {
-			continue
+	var allowed bool
+	if len(unboundOwners) > 0 {
+		unboundGrants, err := s.permissions.GrantsForOwners(ctx, unboundOwners, req)
+		if err != nil {
+			return false, err
 		}
-		resolvedGrant, err := resolveGrantBindings(grant, bindingByRoleID)
+		for _, grant := range unboundGrants {
+			if grant.IsExpiredAt(now) {
+				continue
+			}
+			if !grantMatchesRequest(grant, req) || !grantMatchesFieldPath(grant, fieldPath) {
+				continue
+			}
+			if grant.Effect == EffectDeny {
+				if fieldPath == nil && len(grant.RestrictedFields) > 0 {
+					continue
+				}
+				return false, nil
+			}
+			allowed = true
+		}
+	}
+
+	// Phase 2: evaluate role-based grants per assignment so that each assignment's
+	// binding values are resolved independently. This prevents overwriting bindings
+	// when the same role is held with different values (e.g. team.viewer in Team 42
+	// and Team 99 simultaneously).
+	//
+	// ExpandRoles results are memoised within the request to avoid redundant store
+	// calls when multiple assignments share the same root role.
+	expandCache := map[string][]string{}
+
+	for _, assignment := range roleAssignments {
+		roleIDs, err := s.expandRolesCached(ctx, assignment.RoleID, expandCache)
 		if err != nil {
 			return false, err
 		}
 
-		if !grantMatchesRequest(resolvedGrant, req) {
-			continue
+		roleOwners := make([]PrincipalRef, len(roleIDs))
+		for i, rID := range roleIDs {
+			roleOwners[i] = PrincipalRef{Kind: PrincipalRole, ID: rID}
 		}
 
-		if !grantMatchesFieldPath(resolvedGrant, fieldPath) {
-			continue
+		roleGrants, err := s.permissions.GrantsForOwners(ctx, roleOwners, req)
+		if err != nil {
+			return false, err
 		}
 
-		if resolvedGrant.Effect == EffectDeny {
-			if fieldPath == nil && len(resolvedGrant.RestrictedFields) > 0 {
-				// Field-scoped deny does not deny the entire permission check.
+		// Build a single-entry binding map for this assignment so resolveGrantBindings
+		// can resolve variable scopes correctly.
+		bindingMap := map[string]map[string]any{
+			assignment.RoleID: assignment.BindingValues,
+		}
+
+		roleIDSet := make(map[string]bool, len(roleIDs))
+		for _, rID := range roleIDs {
+			roleIDSet[rID] = true
+		}
+
+		for _, grant := range roleGrants {
+			if grant.OwnerKind == PrincipalRole && !roleIDSet[grant.OwnerID] {
 				continue
 			}
-			return false, nil
+			if grant.IsExpiredAt(now) {
+				continue
+			}
+			resolvedGrant, err := resolveGrantBindings(grant, bindingMap)
+			if err != nil {
+				return false, err
+			}
+			if !grantMatchesRequest(resolvedGrant, req) || !grantMatchesFieldPath(resolvedGrant, fieldPath) {
+				continue
+			}
+			if resolvedGrant.Effect == EffectDeny {
+				if fieldPath == nil && len(resolvedGrant.RestrictedFields) > 0 {
+					continue
+				}
+				return false, nil
+			}
+			allowed = true
 		}
-		allowed = true
 	}
 
 	return allowed, nil
+}
+
+// expandRolesCached calls ExpandRoles and memoises the result so that multiple
+// assignments sharing the same root role only hit the store once per request.
+func (s *Service) expandRolesCached(ctx context.Context, rootRoleID string, cache map[string][]string) ([]string, error) {
+	if cached, ok := cache[rootRoleID]; ok {
+		return cached, nil
+	}
+	roleIDs, err := s.permissions.ExpandRoles(ctx, []string{rootRoleID})
+	if err != nil {
+		return nil, err
+	}
+	cache[rootRoleID] = roleIDs
+	return roleIDs, nil
 }
 
 func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamID *int64) ([]EffectivePermission, error) {
@@ -422,73 +471,95 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 		return nil, err
 	}
 
-	bindingByRoleID := make(map[string]map[string]any, len(roleAssignments))
-	directRoleIDs := make([]string, 0, len(roleAssignments))
-	for _, assignment := range roleAssignments {
-		directRoleIDs = append(directRoleIDs, assignment.RoleID)
-		bindingByRoleID[assignment.RoleID] = assignment.BindingValues
-	}
-
-	expandedRoleIDs, err := s.permissions.ExpandRoles(ctx, directRoleIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	owners := make([]PrincipalRef, 0, 1+len(groupIDs)+len(expandedRoleIDs))
-	owners = append(owners, PrincipalRef{Kind: PrincipalUser, ID: userID})
-	for _, groupID := range groupIDs {
-		owners = append(owners, PrincipalRef{Kind: PrincipalGroup, ID: groupID})
-	}
-	for _, roleID := range expandedRoleIDs {
-		owners = append(owners, PrincipalRef{Kind: PrincipalRole, ID: roleID})
-	}
-
-	grants, err := s.permissions.GrantsForOwners(ctx, owners, Request{UserID: userID, TeamID: teamID})
-	if err != nil {
-		return nil, err
-	}
-
 	denied := map[string]bool{}
 	allowed := map[string]EffectivePermission{}
 
-	for _, grant := range grants {
-		if grant.IsExpiredAt(now) {
-			continue
-		}
-		resolvedGrant, err := resolveGrantBindings(grant, bindingByRoleID)
-		if err != nil {
-			return nil, err
-		}
-
+	accumulateGrant := func(resolvedGrant Grant) {
 		if !matchesTeamScope(resolvedGrant, teamID) {
-			continue
+			return
 		}
-
 		key := permissionKey(resolvedGrant)
 		if resolvedGrant.Effect == EffectDeny {
 			denied[key] = true
 			delete(allowed, key)
-			continue
+			return
 		}
-
 		if denied[key] {
-			continue
+			return
 		}
-
 		if _, exists := allowed[key]; exists {
-			continue
+			return
 		}
-
 		allowed[key] = EffectivePermission{
-			TeamScope:      resolvedGrant.TeamScope,
-			ObjectScope:    resolvedGrant.ObjectScope,
-			PermissionName: resolvedGrant.PermissionName,
-			Source: PrincipalRef{
-				Kind: resolvedGrant.OwnerKind,
-				ID:   resolvedGrant.OwnerID,
-			},
+			TeamScope:        resolvedGrant.TeamScope,
+			ObjectScope:      resolvedGrant.ObjectScope,
+			PermissionName:   resolvedGrant.PermissionName,
+			Source:           PrincipalRef{Kind: resolvedGrant.OwnerKind, ID: resolvedGrant.OwnerID},
 			Effect:           resolvedGrant.Effect,
 			RestrictedFields: append([]string(nil), resolvedGrant.RestrictedFields...),
+		}
+	}
+
+	baseReq := Request{UserID: userID, TeamID: teamID}
+
+	// Phase 1: unbound principals (user + groups).
+	unboundOwners := make([]PrincipalRef, 0, 1+len(groupIDs))
+	unboundOwners = append(unboundOwners, PrincipalRef{Kind: PrincipalUser, ID: userID})
+	for _, groupID := range groupIDs {
+		unboundOwners = append(unboundOwners, PrincipalRef{Kind: PrincipalGroup, ID: groupID})
+	}
+
+	unboundGrants, err := s.permissions.GrantsForOwners(ctx, unboundOwners, baseReq)
+	if err != nil {
+		return nil, err
+	}
+	for _, grant := range unboundGrants {
+		if !grant.IsExpiredAt(now) {
+			accumulateGrant(grant)
+		}
+	}
+
+	// Phase 2: per-assignment role evaluation so each assignment's bindings are
+	// resolved independently.
+	expandCache := map[string][]string{}
+
+	for _, assignment := range roleAssignments {
+		roleIDs, err := s.expandRolesCached(ctx, assignment.RoleID, expandCache)
+		if err != nil {
+			return nil, err
+		}
+
+		roleOwners := make([]PrincipalRef, len(roleIDs))
+		for i, rID := range roleIDs {
+			roleOwners[i] = PrincipalRef{Kind: PrincipalRole, ID: rID}
+		}
+
+		roleGrants, err := s.permissions.GrantsForOwners(ctx, roleOwners, baseReq)
+		if err != nil {
+			return nil, err
+		}
+
+		bindingMap := map[string]map[string]any{
+			assignment.RoleID: assignment.BindingValues,
+		}
+
+		roleIDSet := make(map[string]bool, len(roleIDs))
+		for _, rID := range roleIDs {
+			roleIDSet[rID] = true
+		}
+
+		for _, grant := range roleGrants {
+			if grant.OwnerKind == PrincipalRole && !roleIDSet[grant.OwnerID] {
+				continue
+			}
+			if grant.IsExpiredAt(now) {
+				continue
+			}
+			resolvedGrant, err := resolveGrantBindings(grant, bindingMap)
+			if err != nil {
+				return nil, err
+			}
+			accumulateGrant(resolvedGrant)
 		}
 	}
 
@@ -735,16 +806,25 @@ func (s *Service) resolveUserGroupIDs(ctx context.Context, userID string) ([]str
 
 func (s *Service) resolveRoleAssignmentsForUserAndGroups(ctx context.Context, userID string, groupIDs []string) ([]RoleAssignment, error) {
 	result := []RoleAssignment{}
-	seenRoleIDs := map[string]bool{}
+
+	// Deduplicate on the (RoleID, BindingValues) pair so that identical duplicate
+	// assignments are collapsed, but the same role held with *different* binding
+	// values (e.g. team.viewer in Team 42 AND Team 99) is preserved as two
+	// distinct entries.
+	seenPairs := map[string]bool{}
 	appendUnique := func(assignments []RoleAssignment) {
 		for _, assignment := range assignments {
-			if assignment.RoleID == "" || seenRoleIDs[assignment.RoleID] {
+			if assignment.RoleID == "" {
 				continue
 			}
-			seenRoleIDs[assignment.RoleID] = true
 			if assignment.BindingValues == nil {
 				assignment.BindingValues = map[string]any{}
 			}
+			pairKey := assignmentKey(assignment)
+			if seenPairs[pairKey] {
+				continue
+			}
+			seenPairs[pairKey] = true
 			result = append(result, assignment)
 		}
 	}
@@ -768,6 +848,30 @@ func (s *Service) resolveRoleAssignmentsForUserAndGroups(ctx context.Context, us
 	appendUnique(s.syntheticRoleAssignments(userID, groupIDs))
 
 	return result, nil
+}
+
+// assignmentKey returns a stable string key for a (RoleID, BindingValues) pair
+// used to deduplicate role assignments without losing multi-tenant entries.
+func assignmentKey(a RoleAssignment) string {
+	if len(a.BindingValues) == 0 {
+		return a.RoleID + ":"
+	}
+	// Sort keys for deterministic output.
+	keys := make([]string, 0, len(a.BindingValues))
+	for k := range a.BindingValues {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var sb strings.Builder
+	sb.WriteString(a.RoleID)
+	sb.WriteByte(':')
+	for _, k := range keys {
+		sb.WriteString(k)
+		sb.WriteByte('=')
+		sb.WriteString(fmt.Sprintf("%v", a.BindingValues[k]))
+		sb.WriteByte(',')
+	}
+	return sb.String()
 }
 
 func (s *Service) syntheticRoleAssignments(userID string, groupIDs []string) []RoleAssignment {

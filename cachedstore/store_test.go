@@ -109,6 +109,13 @@ func (s *countingStore) DeleteRole(_ context.Context, _ string) error {
 	return nil
 }
 
+func (s *countingStore) AddRoleInheritance(_ context.Context, _, _ string) error {
+	s.mu.Lock()
+	s.deleteRoleCalls++ // reuse counter; just needs to satisfy interface
+	s.mu.Unlock()
+	return nil
+}
+
 func TestStore_CachesReadResults(t *testing.T) {
 	base := &countingStore{}
 	store := NewStoreWithTTL(base, time.Minute)

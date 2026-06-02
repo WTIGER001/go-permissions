@@ -14,6 +14,10 @@ type PermissionStore interface {
 	CreateRole(ctx context.Context, role Role) error
 	UpdateRole(ctx context.Context, role Role) error
 	DeleteRole(ctx context.Context, roleID string) error
+	// AddRoleInheritance declares that parentRoleID inherits all permissions of
+	// childRoleID. The store must maintain transitive closure so that
+	// ExpandRoles returns every transitively inherited role.
+	AddRoleInheritance(ctx context.Context, parentRoleID, childRoleID string) error
 	RoleAssignmentsForPrincipal(ctx context.Context, principal PrincipalRef) ([]RoleAssignment, error)
 	AssignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error
 	GrantsForPrincipal(ctx context.Context, principal PrincipalRef) ([]Grant, error)

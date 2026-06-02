@@ -102,6 +102,7 @@ func (examplePolicyStore) AssignRole(_ context.Context, _ PrincipalRef, _ string
 func (examplePolicyStore) CreateRole(_ context.Context, _ Role) error   { return nil }
 func (examplePolicyStore) UpdateRole(_ context.Context, _ Role) error   { return nil }
 func (examplePolicyStore) DeleteRole(_ context.Context, _ string) error { return nil }
+func (examplePolicyStore) AddRoleInheritance(_ context.Context, _, _ string) error { return nil }
 
 func ExampleNewServiceWithIdentity_customIdentityAdapter() {
 	identity := exampleIdentityAdapter{

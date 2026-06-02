@@ -208,6 +208,14 @@ func (s *Store) DeleteRole(ctx context.Context, roleID string) error {
 	return nil
 }
 
+func (s *Store) AddRoleInheritance(ctx context.Context, parentRoleID, childRoleID string) error {
+	if err := s.base.AddRoleInheritance(ctx, parentRoleID, childRoleID); err != nil {
+		return err
+	}
+	s.InvalidateAll()
+	return nil
+}
+
 func makeKey(prefix string, value any) string {
 	encoded, err := json.Marshal(value)
 	if err != nil {

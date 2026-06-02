@@ -262,11 +262,16 @@ join owner_refs r on r.owner_kind = pg.owner_kind and r.owner_id = pg.owner_id
 where ($3::text = '' or pg.permission_name = $3)
 	and (pg.expires_at is null or pg.expires_at > now())
 	and (
-		($4::text is null and pg.team_scope = '*')
-		or
-		($4::text is not null and (pg.team_scope = '*' or pg.team_scope = $4::text))
+		pg.team_scope = '*'
+		or pg.team_scope like '?%'
+		or ($4::text is not null and pg.team_scope = $4::text)
 	)
-	and (pg.object_scope is null or pg.object_scope = '*' or pg.object_scope = $5::text)
+	and (
+		pg.object_scope is null
+		or pg.object_scope = '*'
+		or pg.object_scope like '?%'
+		or ($5::text is not null and pg.object_scope = $5::text)
+	)
 `
 
 	rows, err := s.pool.Query(ctx, query, kinds, ids, req.Perm, teamScope, req.Object)
@@ -523,6 +528,62 @@ func (s *Store) DeleteRole(ctx context.Context, roleID string) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("role not found: %s", roleID)
+	}
+
+	return nil
+}
+
+// AddRoleInheritance inserts a parent→child direct edge into role_inheritance
+// and extends role_closure so that every ancestor of the parent also sees all
+// descendants of the child. The closure extension follows the standard
+// closure-table algorithm: for every (ancestor, parent) row we add
+// (ancestor, descendant) rows for all (child, descendant) rows.
+func (s *Store) AddRoleInheritance(ctx context.Context, parentRoleID, childRoleID string) error {
+	if parentRoleID == "" {
+		return fmt.Errorf("parent role ID is required")
+	}
+	if childRoleID == "" {
+		return fmt.Errorf("child role ID is required")
+	}
+	if parentRoleID == childRoleID {
+		return fmt.Errorf("a role cannot inherit itself")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin role inheritance transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Insert the direct edge (idempotent).
+	const insertEdge = `
+insert into role_inheritance (parent_role_id, child_role_id)
+values ($1, $2)
+on conflict do nothing
+`
+	if _, err := tx.Exec(ctx, insertEdge, parentRoleID, childRoleID); err != nil {
+		return fmt.Errorf("insert role inheritance edge: %w", err)
+	}
+
+	// Extend role_closure:
+	// For each ancestor A of parentRoleID (including itself) and each
+	// descendant D of childRoleID (including itself), insert (A, D).
+	const extendClosure = `
+insert into role_closure (ancestor_role_id, descendant_role_id, depth)
+select a.ancestor_role_id, d.descendant_role_id,
+       a.depth + d.depth + 1
+from role_closure a
+cross join role_closure d
+where a.descendant_role_id = $1
+  and d.ancestor_role_id   = $2
+on conflict do nothing
+`
+	if _, err := tx.Exec(ctx, extendClosure, parentRoleID, childRoleID); err != nil {
+		return fmt.Errorf("extend role closure: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit role inheritance transaction: %w", err)
 	}
 
 	return nil

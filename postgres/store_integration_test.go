@@ -186,3 +186,56 @@ func TestCreateGrants_BulkInsert(t *testing.T) {
 		t.Fatalf("expected 2 inserted grants, got %d", count)
 	}
 }
+
+func TestPostgresGrantsForOwners_DynamicScopes(t *testing.T) {
+	store, pool := newTestStore(t)
+	ctx := context.Background()
+
+	seedStatements := []string{
+		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('user', 'u-1', 'allow', '?team', null, 'billing.read', '{\"team\":\"required\"}'::jsonb)",
+		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('user', 'u-1', 'allow', '*', '?object', 'billing.read', '{\"object\":\"required\"}'::jsonb)",
+	}
+
+	for _, stmt := range seedStatements {
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			t.Fatalf("seed statement failed (%s): %v", stmt, err)
+		}
+	}
+
+	teamID := int64(42)
+	owners := []permissions.PrincipalRef{
+		{Kind: permissions.PrincipalUser, ID: "u-1"},
+	}
+
+	// 1. Verify we fetch the grant with dynamic team_scope '?team'
+	grants, err := store.ListGrantsForOwners(ctx, owners, permissions.Request{
+		UserID: "u-1",
+		TeamID: &teamID,
+		Perm:   "billing.read",
+	})
+	if err != nil {
+		t.Fatalf("ListGrantsForOwners: %v", err)
+	}
+
+	// We expect both the '?team' grant and the '?object' grant (which has '*' team_scope) to be retrieved!
+	if len(grants) != 2 {
+		t.Fatalf("expected 2 dynamic grants, got %d", len(grants))
+	}
+
+	var foundTeamScope, foundObjectScope bool
+	for _, g := range grants {
+		if g.TeamScope == "?team" {
+			foundTeamScope = true
+		}
+		if g.ObjectScope != nil && *g.ObjectScope == "?object" {
+			foundObjectScope = true
+		}
+	}
+
+	if !foundTeamScope {
+		t.Errorf("expected to find grant with dynamic '?team' team_scope")
+	}
+	if !foundObjectScope {
+		t.Errorf("expected to find grant with dynamic '?object' object_scope")
+	}
+}

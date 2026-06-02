@@ -17,6 +17,9 @@ type Data struct {
 	UserGroups           map[string][]string                     `json:"user_groups"`
 	UserRoleAssignments  map[string][]permissions.RoleAssignment `json:"user_role_assignments"`
 	GroupRoleAssignments map[string][]permissions.RoleAssignment `json:"group_role_assignments"`
+	// RoleInheritance stores the direct parent->children edges for persistence.
+	RoleInheritance      map[string][]string                     `json:"role_inheritance"`
+	// RoleExpansion is kept for backward-compatible test seeding only.
 	RoleExpansion        map[string][]string                     `json:"role_expansion"`
 	Grants               []permissions.Grant                     `json:"grants"`
 }
@@ -253,25 +256,63 @@ func (s *Store) ListExpandedRoleIDs(_ context.Context, roleIDs []string) ([]stri
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	return transitiveExpand(roleIDs, s.data.RoleInheritance, s.data.RoleExpansion), nil
+}
+
+// transitiveExpand walks the RoleInheritance and (legacy) RoleExpansion maps
+// recursively and returns every transitively reachable descendant of the given
+// seed roleIDs, including the seeds themselves.
+func transitiveExpand(roleIDs []string, inheritance, legacy map[string][]string) []string {
 	seen := map[string]bool{}
+	queue := append([]string(nil), roleIDs...)
 	expanded := make([]string, 0, len(roleIDs))
 
-	for _, roleID := range roleIDs {
-		if !seen[roleID] {
-			seen[roleID] = true
-			expanded = append(expanded, roleID)
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if seen[current] {
+			continue
 		}
+		seen[current] = true
+		expanded = append(expanded, current)
 
-		for _, child := range s.data.RoleExpansion[roleID] {
-			if seen[child] {
-				continue
+		for _, child := range inheritance[current] {
+			if !seen[child] {
+				queue = append(queue, child)
 			}
-			seen[child] = true
-			expanded = append(expanded, child)
+		}
+		for _, child := range legacy[current] {
+			if !seen[child] {
+				queue = append(queue, child)
+			}
 		}
 	}
+	return expanded
+}
 
-	return expanded, nil
+// AddRoleInheritance persists a parent→child direct edge and saves the store.
+func (s *Store) AddRoleInheritance(_ context.Context, parentRoleID, childRoleID string) error {
+	if parentRoleID == "" {
+		return fmt.Errorf("parent role ID is required")
+	}
+	if childRoleID == "" {
+		return fmt.Errorf("child role ID is required")
+	}
+	if parentRoleID == childRoleID {
+		return fmt.Errorf("a role cannot inherit itself")
+	}
+
+	s.mu.Lock()
+	for _, existing := range s.data.RoleInheritance[parentRoleID] {
+		if existing == childRoleID {
+			s.mu.Unlock()
+			return nil
+		}
+	}
+	s.data.RoleInheritance[parentRoleID] = append(s.data.RoleInheritance[parentRoleID], childRoleID)
+	s.mu.Unlock()
+
+	return s.Save()
 }
 
 func (s *Store) ExpandRoles(ctx context.Context, roleIDs []string) ([]string, error) {
@@ -425,6 +466,7 @@ func emptyData() Data {
 		UserGroups:           map[string][]string{},
 		UserRoleAssignments:  map[string][]permissions.RoleAssignment{},
 		GroupRoleAssignments: map[string][]permissions.RoleAssignment{},
+		RoleInheritance:      map[string][]string{},
 		RoleExpansion:        map[string][]string{},
 		Grants:               []permissions.Grant{},
 	}
@@ -439,6 +481,9 @@ func normalizeData(data Data) Data {
 	}
 	if data.GroupRoleAssignments == nil {
 		data.GroupRoleAssignments = map[string][]permissions.RoleAssignment{}
+	}
+	if data.RoleInheritance == nil {
+		data.RoleInheritance = map[string][]string{}
 	}
 	if data.RoleExpansion == nil {
 		data.RoleExpansion = map[string][]string{}
@@ -462,6 +507,10 @@ func cloneData(data Data) Data {
 
 	for groupID, assignments := range data.GroupRoleAssignments {
 		cloned.GroupRoleAssignments[groupID] = cloneRoleAssignments(assignments)
+	}
+
+	for roleID, children := range data.RoleInheritance {
+		cloned.RoleInheritance[roleID] = append([]string(nil), children...)
 	}
 
 	for roleID, children := range data.RoleExpansion {

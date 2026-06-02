@@ -24,6 +24,7 @@ type HarnessStore interface {
 	SeedDenyOverridesAllow(ctx context.Context, t *testing.T) permissions.Request
 	SeedStrictBindingError(ctx context.Context, t *testing.T) permissions.Request
 	SeedEffectivePermissions(ctx context.Context, t *testing.T) EffectiveExpectation
+	SeedTransitiveRoles(ctx context.Context, t *testing.T) permissions.Request
 }
 
 type Harness struct {
@@ -110,6 +111,23 @@ func (h *Harness) RunAll(t *testing.T) {
 			if unexpectedSet[p] {
 				t.Fatalf("permission %q should have been filtered out", p)
 			}
+		}
+	})
+
+	// HasPermission via multi-hop transitive role inheritance:
+	// user -> r-top -> r-mid -> r-leaf (grant is on r-leaf).
+	t.Run(name+"/HasPermission_transitive_role_inheritance", func(t *testing.T) {
+		ctx := context.Background()
+		h.store.Reset(ctx, t)
+		svc := permissions.NewServiceWithProviders(h.store, h.store)
+
+		req := h.store.SeedTransitiveRoles(ctx, t)
+		allowed, err := svc.HasPermission(ctx, req)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+		if !allowed {
+			t.Fatalf("expected allowed result via transitive role chain")
 		}
 	})
 }

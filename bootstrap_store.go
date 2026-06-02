@@ -10,17 +10,24 @@ import (
 )
 
 type bootstrapStore struct {
-	mu          sync.RWMutex
-	roles       map[string]Role
-	assignments map[string][]RoleAssignment
-	grants      []Grant
+	mu              sync.RWMutex
+	roles           map[string]Role
+	assignments     map[string][]RoleAssignment
+	grants          []Grant
+	// roleInheritance maps parent -> set of direct children.
+	roleInheritance map[string]map[string]bool
+	// roleClosure maps ancestor -> set of all descendants (transitive).
+	// Every role is its own descendant at depth 0.
+	roleClosure    map[string]map[string]bool
 }
 
 func newBootstrapStore() *bootstrapStore {
 	return &bootstrapStore{
-		roles:       map[string]Role{},
-		assignments: map[string][]RoleAssignment{},
-		grants:      []Grant{},
+		roles:           map[string]Role{},
+		assignments:     map[string][]RoleAssignment{},
+		grants:          []Grant{},
+		roleInheritance: map[string]map[string]bool{},
+		roleClosure:    map[string]map[string]bool{},
 	}
 }
 
@@ -62,6 +69,11 @@ func (s *bootstrapStore) CreateRole(_ context.Context, role Role) error {
 		return fmt.Errorf("role already exists: %s", role.ID)
 	}
 	s.roles[role.ID] = role
+	// Every role is its own ancestor at depth 0.
+	if s.roleClosure[role.ID] == nil {
+		s.roleClosure[role.ID] = map[string]bool{}
+	}
+	s.roleClosure[role.ID][role.ID] = true
 	return nil
 }
 
@@ -95,6 +107,16 @@ func (s *bootstrapStore) DeleteRole(_ context.Context, roleID string) error {
 		return fmt.Errorf("role not found: %s", roleID)
 	}
 	delete(s.roles, roleID)
+	delete(s.roleInheritance, roleID)
+	delete(s.roleClosure, roleID)
+	for ancestor, descendants := range s.roleClosure {
+		delete(descendants, roleID)
+		s.roleClosure[ancestor] = descendants
+	}
+	for parent, children := range s.roleInheritance {
+		delete(children, roleID)
+		s.roleInheritance[parent] = children
+	}
 	for key, assignments := range s.assignments {
 		filtered := make([]RoleAssignment, 0, len(assignments))
 		for _, assignment := range assignments {
@@ -103,6 +125,60 @@ func (s *bootstrapStore) DeleteRole(_ context.Context, roleID string) error {
 			}
 		}
 		s.assignments[key] = filtered
+	}
+	return nil
+}
+
+// AddRoleInheritance adds a parent→child inheritance edge and recomputes the
+// full transitive closure so that ExpandRoles returns all inherited descendants.
+func (s *bootstrapStore) AddRoleInheritance(_ context.Context, parentRoleID, childRoleID string) error {
+	if parentRoleID == "" {
+		return fmt.Errorf("parent role ID is required")
+	}
+	if childRoleID == "" {
+		return fmt.Errorf("child role ID is required")
+	}
+	if parentRoleID == childRoleID {
+		return fmt.Errorf("a role cannot inherit itself")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Record direct edge.
+	if s.roleInheritance[parentRoleID] == nil {
+		s.roleInheritance[parentRoleID] = map[string]bool{}
+	}
+	if s.roleInheritance[parentRoleID][childRoleID] {
+		return nil // already recorded
+	}
+	s.roleInheritance[parentRoleID][childRoleID] = true
+
+	// Ensure both roles have a self-closure entry.
+	if s.roleClosure[parentRoleID] == nil {
+		s.roleClosure[parentRoleID] = map[string]bool{parentRoleID: true}
+	}
+	if s.roleClosure[childRoleID] == nil {
+		s.roleClosure[childRoleID] = map[string]bool{childRoleID: true}
+	}
+
+	// All descendants of childRoleID are now also descendants of parentRoleID
+	// and of every ancestor of parentRoleID.
+	// New descendants to add = closure(child).
+	newDescendants := s.roleClosure[childRoleID]
+
+	// Collect every ancestor of parentRoleID (roles whose closure contains parentRoleID).
+	ancestors := []string{parentRoleID}
+	for ancestor, descendants := range s.roleClosure {
+		if descendants[parentRoleID] && ancestor != parentRoleID {
+			ancestors = append(ancestors, ancestor)
+		}
+	}
+
+	for _, ancestor := range ancestors {
+		for desc := range newDescendants {
+			s.roleClosure[ancestor][desc] = true
+		}
 	}
 	return nil
 }
@@ -301,15 +377,29 @@ func (s *bootstrapStore) PrincipalsWithGrant(_ context.Context, req Request) ([]
 }
 
 func (s *bootstrapStore) ExpandRoles(_ context.Context, roleIDs []string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	seen := map[string]bool{}
 	result := make([]string, 0, len(roleIDs))
+
 	for _, roleID := range roleIDs {
 		trimmed := strings.TrimSpace(roleID)
-		if trimmed == "" || seen[trimmed] {
+		if trimmed == "" {
 			continue
 		}
-		seen[trimmed] = true
-		result = append(result, trimmed)
+		// Add the role itself.
+		if !seen[trimmed] {
+			seen[trimmed] = true
+			result = append(result, trimmed)
+		}
+		// Walk the transitive closure.
+		for descendant := range s.roleClosure[trimmed] {
+			if !seen[descendant] {
+				seen[descendant] = true
+				result = append(result, descendant)
+			}
+		}
 	}
 	return result, nil
 }

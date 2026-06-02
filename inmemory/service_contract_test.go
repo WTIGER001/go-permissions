@@ -26,6 +26,8 @@ func (s *harnessStore) Reset(_ context.Context, _ *testing.T) {
 	s.userRoleAssignments = map[string][]permissions.RoleAssignment{}
 	s.groupRoleAssignments = map[string][]permissions.RoleAssignment{}
 	s.roleExpansion = map[string][]string{}
+	s.roleInheritance = map[string]map[string]bool{}
+	s.roleClosure = map[string]map[string]bool{}
 	s.grants = []permissions.Grant{}
 	s.IdentityProvider.userGroups = map[string][]string{}
 }
@@ -71,6 +73,27 @@ func (s *harnessStore) SeedEffectivePermissions(_ context.Context, _ *testing.T)
 		ExpectedPerms:   []string{"report.write"},
 		UnexpectedPerms: []string{"report.read"},
 	}
+}
+
+func (s *harnessStore) SeedTransitiveRoles(ctx context.Context, t *testing.T) permissions.Request {
+	t.Helper()
+	// Build: user u-1 -> r-top -> r-mid -> r-leaf (3-hop chain).
+	// Grant is only on r-leaf; the service must expand the chain to find it.
+	if err := s.AddRoleInheritance(ctx, "r-top", "r-mid"); err != nil {
+		t.Fatalf("AddRoleInheritance r-top->r-mid: %v", err)
+	}
+	if err := s.AddRoleInheritance(ctx, "r-mid", "r-leaf"); err != nil {
+		t.Fatalf("AddRoleInheritance r-mid->r-leaf: %v", err)
+	}
+	s.AddUserRoleAssignments("u-1", permissions.RoleAssignment{RoleID: "r-top", BindingValues: map[string]any{}})
+	s.AddGrants(permissions.Grant{
+		OwnerKind:      permissions.PrincipalRole,
+		OwnerID:        "r-leaf",
+		Effect:         permissions.EffectAllow,
+		TeamScope:      "*",
+		PermissionName: "reports.view",
+	})
+	return permissions.Request{UserID: "u-1", TeamID: nil, Object: "reports", Perm: "reports.view"}
 }
 
 func strPtr(v string) *string {

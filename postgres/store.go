@@ -45,9 +45,12 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 			code text not null unique,
 			description text,
 			built_in boolean not null default false,
+			is_disabled boolean not null default false,
 			created_at timestamptz not null default now(),
 			updated_at timestamptz not null default now()
 		);`,
+		`alter table roles add column if not exists built_in boolean not null default false;`,
+		`alter table roles add column if not exists is_disabled boolean not null default false;`,
 		`create table if not exists role_inheritance (
 			parent_role_id text not null references roles(id) on delete cascade,
 			child_role_id text not null references roles(id) on delete cascade,
@@ -404,7 +407,7 @@ func (s *Store) PrincipalsWithGrant(ctx context.Context, req permissions.Request
 
 func (s *Store) RoleDefinitions(ctx context.Context) ([]permissions.Role, error) {
 	const query = `
-select id, code, coalesce(description, '')
+select id, code, coalesce(description, ''), built_in, is_disabled
 from roles
 order by id
 `
@@ -418,7 +421,7 @@ order by id
 	roles := make([]permissions.Role, 0, 16)
 	for rows.Next() {
 		var role permissions.Role
-		if err := rows.Scan(&role.ID, &role.Name, &role.Description); err != nil {
+		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.BuiltIn, &role.IsDisabled); err != nil {
 			return nil, fmt.Errorf("scan role definition: %w", err)
 		}
 		role.VariableSpec = map[string]any{}
@@ -438,13 +441,13 @@ func (s *Store) RoleDefinition(ctx context.Context, roleID string) (permissions.
 	}
 
 	const query = `
-select id, code, coalesce(description, '')
+select id, code, coalesce(description, ''), built_in, is_disabled
 from roles
 where id = $1
 `
 
 	var role permissions.Role
-	if err := s.pool.QueryRow(ctx, query, roleID).Scan(&role.ID, &role.Name, &role.Description); err != nil {
+	if err := s.pool.QueryRow(ctx, query, roleID).Scan(&role.ID, &role.Name, &role.Description, &role.BuiltIn, &role.IsDisabled); err != nil {
 		return permissions.Role{}, fmt.Errorf("query role definition: %w", err)
 	}
 
@@ -468,10 +471,10 @@ func (s *Store) CreateRole(ctx context.Context, role permissions.Role) error {
 	defer tx.Rollback(ctx)
 
 	const insertRole = `
-insert into roles (id, code, description, built_in)
-values ($1, $2, $3, $4)
+insert into roles (id, code, description, built_in, is_disabled)
+values ($1, $2, $3, $4, $5)
 `
-	if _, err := tx.Exec(ctx, insertRole, role.ID, role.Name, role.Description, false); err != nil {
+	if _, err := tx.Exec(ctx, insertRole, role.ID, role.Name, role.Description, role.BuiltIn, role.IsDisabled); err != nil {
 		return fmt.Errorf("insert role: %w", err)
 	}
 
@@ -502,10 +505,10 @@ func (s *Store) UpdateRole(ctx context.Context, role permissions.Role) error {
 
 	const stmt = `
 update roles
-set code = $2, description = $3, updated_at = now()
+set code = $2, description = $3, built_in = $4, is_disabled = $5, updated_at = now()
 where id = $1
 `
-	tag, err := s.pool.Exec(ctx, stmt, role.ID, role.Name, role.Description)
+	tag, err := s.pool.Exec(ctx, stmt, role.ID, role.Name, role.Description, role.BuiltIn, role.IsDisabled)
 	if err != nil {
 		return fmt.Errorf("update role: %w", err)
 	}
@@ -753,6 +756,19 @@ insert into principal_roles (
 
 	if _, err := s.pool.Exec(ctx, stmt, string(principal.Kind), principal.ID, roleID, bindingRaw); err != nil {
 		return fmt.Errorf("insert principal role assignment: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Store) DeleteGrantsForOwner(ctx context.Context, ownerKind permissions.PrincipalKind, ownerID string) error {
+	if ownerID == "" {
+		return fmt.Errorf("owner ID is required")
+	}
+
+	const stmt = `delete from permission_grants where owner_kind = $1 and owner_id = $2`
+	if _, err := s.pool.Exec(ctx, stmt, string(ownerKind), ownerID); err != nil {
+		return fmt.Errorf("delete grants for owner: %w", err)
 	}
 
 	return nil

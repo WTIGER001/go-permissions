@@ -102,4 +102,7 @@ type Role struct {
 	Description  string
 	VariableSpec map[string]any
 	Permissions  []string
+	BuiltIn      bool
+	IsDisabled   bool
 }
+

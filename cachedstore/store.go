@@ -216,6 +216,14 @@ func (s *Store) AddRoleInheritance(ctx context.Context, parentRoleID, childRoleI
 	return nil
 }
 
+func (s *Store) DeleteGrantsForOwner(ctx context.Context, ownerKind permissions.PrincipalKind, ownerID string) error {
+	if err := s.base.DeleteGrantsForOwner(ctx, ownerKind, ownerID); err != nil {
+		return err
+	}
+	s.InvalidateAll()
+	return nil
+}
+
 func makeKey(prefix string, value any) string {
 	encoded, err := json.Marshal(value)
 	if err != nil {

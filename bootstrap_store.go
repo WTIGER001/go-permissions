@@ -434,3 +434,18 @@ func cloneGrant(grant Grant) Grant {
 	}
 	return copyGrant
 }
+
+func (s *bootstrapStore) DeleteGrantsForOwner(_ context.Context, ownerKind PrincipalKind, ownerID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	filtered := make([]Grant, 0, len(s.grants))
+	for _, grant := range s.grants {
+		if grant.OwnerKind == ownerKind && grant.OwnerID == ownerID {
+			continue
+		}
+		filtered = append(filtered, grant)
+	}
+	s.grants = filtered
+	return nil
+}

@@ -40,6 +40,11 @@ func NewService(permissionStore PermissionStore, identityProvider IdentityProvid
 	return service
 }
 
+// Store returns the underlying PermissionStore.
+func (s *Service) Store() PermissionStore {
+	return s.permissions
+}
+
 // SetIdentityProvider updates the identity provider used by permission checks.
 func (s *Service) SetIdentityProvider(identity IdentityProvider) {
 	s.identity = identity
@@ -447,8 +452,16 @@ func (s *Service) expandRolesCached(ctx context.Context, rootRoleID string, cach
 	if err != nil {
 		return nil, err
 	}
-	cache[rootRoleID] = roleIDs
-	return roleIDs, nil
+	filtered := make([]string, 0, len(roleIDs))
+	for _, rID := range roleIDs {
+		roleDef, err := s.permissions.RoleDefinition(ctx, rID)
+		if err == nil && roleDef.IsDisabled {
+			continue // Skip disabled roles!
+		}
+		filtered = append(filtered, rID)
+	}
+	cache[rootRoleID] = filtered
+	return filtered, nil
 }
 
 func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamID *int64) ([]EffectivePermission, error) {
@@ -817,6 +830,10 @@ func (s *Service) resolveRoleAssignmentsForUserAndGroups(ctx context.Context, us
 			if assignment.RoleID == "" {
 				continue
 			}
+			roleDef, err := s.permissions.RoleDefinition(ctx, assignment.RoleID)
+			if err == nil && roleDef.IsDisabled {
+				continue
+			}
 			if assignment.BindingValues == nil {
 				assignment.BindingValues = map[string]any{}
 			}
@@ -1121,6 +1138,58 @@ func (s *Service) ensureRoleExists(ctx context.Context, role Role) error {
 			return nil
 		}
 		return err
+	}
+
+	return nil
+}
+
+// BootstrapBuiltInRole idempotently registers a system-managed (built-in) role definition and seeds its default permissions.
+// If the role already exists, its metadata (Name, Description, VariableSpec, BuiltIn) is updated to support release upgrades.
+func (s *Service) BootstrapBuiltInRole(ctx context.Context, role Role) error {
+	if role.ID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+	if role.Name == "" {
+		return fmt.Errorf("role name is required")
+	}
+
+	role.BuiltIn = true // Always force built-in flag to true
+
+	existing, err := s.permissions.RoleDefinition(ctx, role.ID)
+	if err != nil {
+		// Create the role
+		if err := s.permissions.CreateRole(ctx, role); err != nil {
+			// Check if created concurrently
+			confirm, confirmErr := s.permissions.RoleDefinition(ctx, role.ID)
+			if confirmErr != nil || confirm.ID != role.ID {
+				return fmt.Errorf("failed to create built-in role %s: %w", role.ID, err)
+			}
+		}
+	} else {
+		// Update existing metadata
+		existing.Name = role.Name
+		existing.Description = role.Description
+		existing.VariableSpec = role.VariableSpec
+		existing.BuiltIn = true
+		if err := s.permissions.UpdateRole(ctx, existing); err != nil {
+			return fmt.Errorf("failed to update built-in role %s: %w", role.ID, err)
+		}
+	}
+
+	// Sync default grants
+	grants := make([]Grant, len(role.Permissions))
+	for i, perm := range role.Permissions {
+		grants[i] = Grant{
+			OwnerKind:      PrincipalRole,
+			OwnerID:        role.ID,
+			Effect:         EffectAllow,
+			TeamScope:      "*", // Global within the role container
+			PermissionName: perm,
+		}
+	}
+
+	if err := s.EnsureGrantsForOwners(ctx, grants); err != nil {
+		return fmt.Errorf("failed to seed grants for built-in role %s: %w", role.ID, err)
 	}
 
 	return nil

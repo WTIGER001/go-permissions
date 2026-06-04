@@ -454,12 +454,26 @@ func (s *Store) RoleDefinition(_ context.Context, roleID string) (permissions.Ro
 		return permissions.Role{}, fmt.Errorf("role ID is required")
 	}
 
-	return permissions.Role{ID: roleID, Name: roleID, VariableSpec: map[string]any{}, Permissions: []string{}}, nil
+	return permissions.Role{ID: roleID, Name: roleID, VariableSpec: map[string]any{}, Permissions: []string{}, BuiltIn: false, IsDisabled: false}, nil
 }
 
 func (s *Store) CreateRole(_ context.Context, _ permissions.Role) error { return nil }
 func (s *Store) UpdateRole(_ context.Context, _ permissions.Role) error { return nil }
 func (s *Store) DeleteRole(_ context.Context, _ string) error           { return nil }
+
+func (s *Store) DeleteGrantsForOwner(_ context.Context, ownerKind permissions.PrincipalKind, ownerID string) error {
+	s.mu.Lock()
+	filtered := make([]permissions.Grant, 0, len(s.data.Grants))
+	for _, grant := range s.data.Grants {
+		if grant.OwnerKind == ownerKind && grant.OwnerID == ownerID {
+			continue
+		}
+		filtered = append(filtered, grant)
+	}
+	s.data.Grants = filtered
+	s.mu.Unlock()
+	return s.Save()
+}
 
 func emptyData() Data {
 	return Data{

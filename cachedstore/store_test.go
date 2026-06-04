@@ -116,6 +116,13 @@ func (s *countingStore) AddRoleInheritance(_ context.Context, _, _ string) error
 	return nil
 }
 
+func (s *countingStore) DeleteGrantsForOwner(_ context.Context, _ permissions.PrincipalKind, _ string) error {
+	s.mu.Lock()
+	s.deleteRoleCalls++
+	s.mu.Unlock()
+	return nil
+}
+
 func TestStore_CachesReadResults(t *testing.T) {
 	base := &countingStore{}
 	store := NewStoreWithTTL(base, time.Minute)

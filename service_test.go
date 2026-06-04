@@ -88,7 +88,20 @@ func (m *mockStore) ExpandRoles(_ context.Context, roleIDs []string) ([]string, 
 
 func (m *mockStore) GrantsForOwners(_ context.Context, owners []PrincipalRef, _ Request) ([]Grant, error) {
 	m.lastOwners = append([]PrincipalRef(nil), owners...)
-	return append([]Grant(nil), m.grants...), m.err
+	if len(owners) == 0 {
+		return nil, m.err
+	}
+	ownerMap := make(map[string]bool)
+	for _, o := range owners {
+		ownerMap[string(o.Kind)+":"+o.ID] = true
+	}
+	var filtered []Grant
+	for _, g := range m.grants {
+		if ownerMap[string(g.OwnerKind)+":"+g.OwnerID] {
+			filtered = append(filtered, g)
+		}
+	}
+	return filtered, m.err
 }
 
 func (m *mockStore) PrincipalsWithGrant(_ context.Context, _ Request) ([]PrincipalHit, error) {
@@ -123,8 +136,21 @@ func (m *mockStore) ListExpandedRoleIDs(_ context.Context, _ []string) ([]string
 	return append([]string(nil), m.expandedRoleIDs...), m.err
 }
 
-func (m *mockStore) ListGrantsForOwners(_ context.Context, _ []PrincipalRef, _ Request) ([]Grant, error) {
-	return append([]Grant(nil), m.grants...), m.err
+func (m *mockStore) ListGrantsForOwners(_ context.Context, owners []PrincipalRef, _ Request) ([]Grant, error) {
+	if len(owners) == 0 {
+		return nil, m.err
+	}
+	ownerMap := make(map[string]bool)
+	for _, o := range owners {
+		ownerMap[string(o.Kind)+":"+o.ID] = true
+	}
+	var filtered []Grant
+	for _, g := range m.grants {
+		if ownerMap[string(g.OwnerKind)+":"+g.OwnerID] {
+			filtered = append(filtered, g)
+		}
+	}
+	return filtered, m.err
 }
 
 func (m *mockStore) ListPrincipalsWithGrant(_ context.Context, _ Request) ([]PrincipalHit, error) {
@@ -176,10 +202,12 @@ func (m *mockStore) CreateRole(_ context.Context, role Role) error {
 func (m *mockStore) UpdateRole(_ context.Context, _ Role) error   { return m.err }
 func (m *mockStore) DeleteRole(_ context.Context, _ string) error { return m.err }
 func (m *mockStore) AddRoleInheritance(_ context.Context, _, _ string) error { return m.err }
+func (m *mockStore) DeleteGrantsForOwner(_ context.Context, _ PrincipalKind, _ string) error { return m.err }
 
 func TestHasPermission_DenyOverridesAllow(t *testing.T) {
 	teamID := int64(42)
 	store := &mockStore{
+		groupIDs: []string{"g-1"},
 		grants: []Grant{
 			{
 				OwnerKind:      PrincipalUser,
@@ -244,6 +272,9 @@ func TestHasPermission_StrictMissingBindingReturnsError(t *testing.T) {
 func TestEffectivePermissions_DenyRemovesAllow(t *testing.T) {
 	teamID := int64(7)
 	store := &mockStore{
+		roleAssignments: []RoleAssignment{
+			{RoleID: "r-9"},
+		},
 		grants: []Grant{
 			{
 				OwnerKind:      PrincipalUser,
@@ -1094,5 +1125,146 @@ func TestEffectivePermissions_MultiTenantRole(t *testing.T) {
 	}
 	if eff[0].TeamScope != "42" {
 		t.Fatalf("expected team scope 42, got %q", eff[0].TeamScope)
+	}
+}
+
+func TestHasPermission_DisabledRole(t *testing.T) {
+	store := &mockStore{
+		roleAssignments: []RoleAssignment{
+			{RoleID: "r-operator"},
+		},
+		rolesByID: map[string]Role{
+			"r-operator": {
+				ID:         "r-operator",
+				Name:       "Operator",
+				IsDisabled: true, // Disabled directly!
+			},
+		},
+		grants: []Grant{
+			{
+				OwnerKind:      PrincipalRole,
+				OwnerID:        "r-operator",
+				Effect:         EffectAllow,
+				TeamScope:      "*",
+				PermissionName: "backup.run",
+			},
+		},
+	}
+
+	svc := NewServiceWithProviders(store, store)
+
+	allowed, err := svc.HasPermission(context.Background(), Request{
+		UserID: "u-1",
+		Perm:   "backup.run",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if allowed {
+		t.Fatalf("expected permission to be denied because the role is disabled")
+	}
+}
+
+func TestHasPermission_DisabledRoleInherited(t *testing.T) {
+	store := &mockStore{
+		roleAssignments: []RoleAssignment{
+			{RoleID: "r-custom-operator"},
+		},
+		rolesByID: map[string]Role{
+			"r-custom-operator": {
+				ID:   "r-custom-operator",
+				Name: "Custom Operator",
+			},
+			"r-operator": {
+				ID:         "r-operator",
+				Name:       "Operator",
+				IsDisabled: true, // Inherited role is disabled!
+			},
+		},
+		expandedRoleIDs: []string{"r-custom-operator", "r-operator"},
+		grants: []Grant{
+			{
+				OwnerKind:      PrincipalRole,
+				OwnerID:        "r-operator",
+				Effect:         EffectAllow,
+				TeamScope:      "*",
+				PermissionName: "backup.run",
+			},
+		},
+	}
+
+	svc := NewServiceWithProviders(store, store)
+
+	allowed, err := svc.HasPermission(context.Background(), Request{
+		UserID: "u-1",
+		Perm:   "backup.run",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if allowed {
+		t.Fatalf("expected permission to be denied because the inherited role is disabled")
+	}
+}
+
+func TestService_BootstrapBuiltInRole(t *testing.T) {
+	store := newBootstrapStore()
+	svc := NewServiceWithProviders(store, nil)
+
+	role := Role{
+		ID:          "role.operator",
+		Name:        "Operator",
+		Description: "Backup operator description",
+		Permissions: []string{"backup.run", "backup.list"},
+	}
+
+	// 1. First Boot: Should create the role with BuiltIn = true and write grants
+	err := svc.BootstrapBuiltInRole(context.Background(), role)
+	if err != nil {
+		t.Fatalf("expected no error during first bootstrap, got %v", err)
+	}
+
+	dbRole, err := store.RoleDefinition(context.Background(), "role.operator")
+	if err != nil {
+		t.Fatalf("expected role definition to exist, got %v", err)
+	}
+	if !dbRole.BuiltIn {
+		t.Fatalf("expected role to be marked as BuiltIn")
+	}
+	if dbRole.Name != "Operator" {
+		t.Fatalf("expected role name to be Operator, got %q", dbRole.Name)
+	}
+
+	grants, err := store.GrantsForPrincipal(context.Background(), PrincipalRef{Kind: PrincipalRole, ID: "role.operator"})
+	if err != nil {
+		t.Fatalf("expected grants lookup to succeed, got %v", err)
+	}
+	if len(grants) != 2 {
+		t.Fatalf("expected exactly 2 grants, got %d", len(grants))
+	}
+
+	// 2. Second Boot (Upgrade): Should update description and idempotently preserve grants
+	role.Description = "Updated description"
+	role.Permissions = append(role.Permissions, "backup.download")
+
+	err = svc.BootstrapBuiltInRole(context.Background(), role)
+	if err != nil {
+		t.Fatalf("expected no error during second bootstrap, got %v", err)
+	}
+
+	dbRole2, err := store.RoleDefinition(context.Background(), "role.operator")
+	if err != nil {
+		t.Fatalf("expected role definition to exist, got %v", err)
+	}
+	if dbRole2.Description != "Updated description" {
+		t.Fatalf("expected role description to be updated, got %q", dbRole2.Description)
+	}
+
+	grants2, err := store.GrantsForPrincipal(context.Background(), PrincipalRef{Kind: PrincipalRole, ID: "role.operator"})
+	if err != nil {
+		t.Fatalf("expected grants lookup to succeed, got %v", err)
+	}
+	if len(grants2) != 3 {
+		t.Fatalf("expected exactly 3 grants after upgrade, got %d", len(grants2))
 	}
 }

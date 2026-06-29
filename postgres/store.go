@@ -52,13 +52,13 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		`alter table roles add column if not exists built_in boolean not null default false;`,
 		`alter table roles add column if not exists is_disabled boolean not null default false;`,
 		`create table if not exists role_inheritance (
-			parent_role_id text not null references roles(id) on delete cascade,
-			child_role_id text not null references roles(id) on delete cascade,
+			parent_role_id text not null,
+			child_role_id text not null,
 			primary key (parent_role_id, child_role_id)
 		);`,
 		`create table if not exists role_closure (
-			ancestor_role_id text not null references roles(id) on delete cascade,
-			descendant_role_id text not null references roles(id) on delete cascade,
+			ancestor_role_id text not null,
+			descendant_role_id text not null,
 			depth int not null,
 			primary key (ancestor_role_id, descendant_role_id)
 		);`,
@@ -66,10 +66,14 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 			id bigserial primary key,
 			principal_kind principal_type not null,
 			principal_id text not null,
-			role_id text not null references roles(id) on delete cascade,
+			role_id text not null,
 			binding_values jsonb not null default '{}'::jsonb,
 			created_at timestamptz not null default now(),
 			unique (principal_kind, principal_id, role_id, binding_values)
+		);`,
+		`create table if not exists disabled_builtin_roles (
+			role_id text primary key,
+			disabled_at timestamptz not null default now()
 		);`,
 		`create table if not exists permission_grants (
 			id bigserial primary key,
@@ -773,3 +777,53 @@ func (s *Store) DeleteGrantsForOwner(ctx context.Context, ownerKind permissions.
 
 	return nil
 }
+
+func (s *Store) DisableBuiltInRole(ctx context.Context, roleID string) error {
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+
+	const stmt = `insert into disabled_builtin_roles (role_id) values ($1) on conflict (role_id) do nothing`
+	if _, err := s.pool.Exec(ctx, stmt, roleID); err != nil {
+		return fmt.Errorf("disable built in role: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Store) EnableBuiltInRole(ctx context.Context, roleID string) error {
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+
+	const stmt = `delete from disabled_builtin_roles where role_id = $1`
+	if _, err := s.pool.Exec(ctx, stmt, roleID); err != nil {
+		return fmt.Errorf("enable built in role: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Store) DisabledBuiltInRoles(ctx context.Context) ([]string, error) {
+	const query = `select role_id from disabled_builtin_roles order by role_id`
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query disabled built in roles: %w", err)
+	}
+	defer rows.Close()
+
+	roles := make([]string, 0)
+	for rows.Next() {
+		var roleID string
+		if err := rows.Scan(&roleID); err != nil {
+			return nil, fmt.Errorf("scan disabled built in role: %w", err)
+		}
+		roles = append(roles, roleID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate disabled built in roles: %w", err)
+	}
+
+	return roles, nil
+}
+

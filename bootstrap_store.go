@@ -10,24 +10,26 @@ import (
 )
 
 type bootstrapStore struct {
-	mu              sync.RWMutex
-	roles           map[string]Role
-	assignments     map[string][]RoleAssignment
-	grants          []Grant
+	mu                   sync.RWMutex
+	roles                map[string]Role
+	assignments          map[string][]RoleAssignment
+	grants               []Grant
+	disabledBuiltInRoles map[string]bool
 	// roleInheritance maps parent -> set of direct children.
 	roleInheritance map[string]map[string]bool
 	// roleClosure maps ancestor -> set of all descendants (transitive).
 	// Every role is its own descendant at depth 0.
-	roleClosure    map[string]map[string]bool
+	roleClosure map[string]map[string]bool
 }
 
 func newBootstrapStore() *bootstrapStore {
 	return &bootstrapStore{
-		roles:           map[string]Role{},
-		assignments:     map[string][]RoleAssignment{},
-		grants:          []Grant{},
-		roleInheritance: map[string]map[string]bool{},
-		roleClosure:    map[string]map[string]bool{},
+		roles:                map[string]Role{},
+		assignments:          map[string][]RoleAssignment{},
+		grants:               []Grant{},
+		disabledBuiltInRoles: map[string]bool{},
+		roleInheritance:      map[string]map[string]bool{},
+		roleClosure:          map[string]map[string]bool{},
 	}
 }
 
@@ -449,3 +451,35 @@ func (s *bootstrapStore) DeleteGrantsForOwner(_ context.Context, ownerKind Princ
 	s.grants = filtered
 	return nil
 }
+
+func (s *bootstrapStore) DisableBuiltInRole(_ context.Context, roleID string) error {
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.disabledBuiltInRoles[roleID] = true
+	return nil
+}
+
+func (s *bootstrapStore) EnableBuiltInRole(_ context.Context, roleID string) error {
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.disabledBuiltInRoles, roleID)
+	return nil
+}
+
+func (s *bootstrapStore) DisabledBuiltInRoles(_ context.Context) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	roles := make([]string, 0, len(s.disabledBuiltInRoles))
+	for roleID := range s.disabledBuiltInRoles {
+		roles = append(roles, roleID)
+	}
+	sort.Strings(roles)
+	return roles, nil
+}
+

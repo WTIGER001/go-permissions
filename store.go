@@ -26,6 +26,9 @@ type PermissionStore interface {
 	PrincipalsWithGrant(ctx context.Context, req Request) ([]PrincipalHit, error)
 	ExpandRoles(ctx context.Context, roleIDs []string) ([]string, error)
 	DeleteGrantsForOwner(ctx context.Context, ownerKind PrincipalKind, ownerID string) error
+	DisableBuiltInRole(ctx context.Context, roleID string) error
+	EnableBuiltInRole(ctx context.Context, roleID string) error
+	DisabledBuiltInRoles(ctx context.Context) ([]string, error)
 }
 
 // BulkGrantStore is an optional extension for stores that can write many grants efficiently.

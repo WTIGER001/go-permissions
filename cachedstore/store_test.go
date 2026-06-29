@@ -123,6 +123,13 @@ func (s *countingStore) DeleteGrantsForOwner(_ context.Context, _ permissions.Pr
 	return nil
 }
 
+func (s *countingStore) DisableBuiltInRole(_ context.Context, _ string) error { return nil }
+func (s *countingStore) EnableBuiltInRole(_ context.Context, _ string) error  { return nil }
+func (s *countingStore) DisabledBuiltInRoles(_ context.Context) ([]string, error) {
+	return []string{}, nil
+}
+
+
 func TestStore_CachesReadResults(t *testing.T) {
 	base := &countingStore{}
 	store := NewStoreWithTTL(base, time.Minute)

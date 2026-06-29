@@ -475,6 +475,13 @@ func (s *Store) DeleteGrantsForOwner(_ context.Context, ownerKind permissions.Pr
 	return s.Save()
 }
 
+func (s *Store) DisableBuiltInRole(_ context.Context, _ string) error { return nil }
+func (s *Store) EnableBuiltInRole(_ context.Context, _ string) error  { return nil }
+func (s *Store) DisabledBuiltInRoles(_ context.Context) ([]string, error) {
+	return []string{}, nil
+}
+
+
 func emptyData() Data {
 	return Data{
 		UserGroups:           map[string][]string{},

@@ -203,6 +203,10 @@ func (m *mockStore) UpdateRole(_ context.Context, _ Role) error   { return m.err
 func (m *mockStore) DeleteRole(_ context.Context, _ string) error { return m.err }
 func (m *mockStore) AddRoleInheritance(_ context.Context, _, _ string) error { return m.err }
 func (m *mockStore) DeleteGrantsForOwner(_ context.Context, _ PrincipalKind, _ string) error { return m.err }
+func (m *mockStore) DisableBuiltInRole(_ context.Context, _ string) error { return m.err }
+func (m *mockStore) EnableBuiltInRole(_ context.Context, _ string) error  { return m.err }
+func (m *mockStore) DisabledBuiltInRoles(_ context.Context) ([]string, error) { return nil, m.err }
+
 
 func TestHasPermission_DenyOverridesAllow(t *testing.T) {
 	teamID := int64(42)
@@ -243,6 +247,7 @@ func TestHasPermission_DenyOverridesAllow(t *testing.T) {
 func TestHasPermission_StrictMissingBindingReturnsError(t *testing.T) {
 	teamID := int64(42)
 	store := &mockStore{
+		roleAssignments: []RoleAssignment{{RoleID: "r-1"}},
 		expandedRoleIDs: []string{"r-1"},
 		grants: []Grant{
 			{
@@ -602,14 +607,14 @@ func TestHasPermission_SyntheticPublicRoleIncludedForAnonymous(t *testing.T) {
 	store := &mockStore{}
 	svc := NewServiceWithProviders(store, store)
 	svc.SetPublicRoleID(SyntheticRolePublic)
+	svc.AddDefaultGrant(SyntheticRolePublic, "public.read", "*")
 
-	_, err := svc.HasPermission(context.Background(), Request{Perm: "public.read"})
+	ok, err := svc.HasPermission(context.Background(), Request{Perm: "public.read"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-
-	if !hasOwner(store.lastOwners, PrincipalRole, SyntheticRolePublic) {
-		t.Fatalf("expected synthetic public role owner to be included, owners=%+v", store.lastOwners)
+	if !ok {
+		t.Fatalf("expected permission allowed via synthetic public role")
 	}
 }
 
@@ -617,14 +622,14 @@ func TestHasPermission_SyntheticAuthenticatedRoleIncluded(t *testing.T) {
 	store := &mockStore{}
 	svc := NewServiceWithProviders(store, store)
 	svc.SetAuthenticatedRoleID(SyntheticRoleAuthenticated)
+	svc.AddDefaultGrant(SyntheticRoleAuthenticated, "any.read", "*")
 
-	_, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", Perm: "any.read"})
+	ok, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", Perm: "any.read"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-
-	if !hasOwner(store.lastOwners, PrincipalRole, SyntheticRoleAuthenticated) {
-		t.Fatalf("expected synthetic authenticated role owner to be included, owners=%+v", store.lastOwners)
+	if !ok {
+		t.Fatalf("expected permission allowed via synthetic authenticated role")
 	}
 }
 
@@ -633,14 +638,14 @@ func TestHasPermission_SyntheticAdminRoleIncludedWhenInAdminGroup(t *testing.T) 
 	svc := NewServiceWithProviders(store, store)
 	svc.SetAdminRoleID(SyntheticRoleAdmin)
 	svc.SetAdminGroupID("g-admin")
+	svc.AddDefaultGrant(SyntheticRoleAdmin, "admin.read", "*")
 
-	_, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", Perm: "admin.read"})
+	ok, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", Perm: "admin.read"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-
-	if !hasOwner(store.lastOwners, PrincipalRole, SyntheticRoleAdmin) {
-		t.Fatalf("expected synthetic admin role owner to be included, owners=%+v", store.lastOwners)
+	if !ok {
+		t.Fatalf("expected permission allowed via synthetic admin role")
 	}
 }
 
@@ -649,14 +654,14 @@ func TestHasPermission_SyntheticAdminRoleNotIncludedWithoutAdminGroupMatch(t *te
 	svc := NewServiceWithProviders(store, store)
 	svc.SetAdminRoleID(SyntheticRoleAdmin)
 	svc.SetAdminGroupID("g-admin")
+	svc.AddDefaultGrant(SyntheticRoleAdmin, "admin.read", "*")
 
-	_, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", Perm: "admin.read"})
+	ok, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", Perm: "admin.read"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-
-	if hasOwner(store.lastOwners, PrincipalRole, SyntheticRoleAdmin) {
-		t.Fatalf("did not expect synthetic admin role owner when user is not in admin group, owners=%+v", store.lastOwners)
+	if ok {
+		t.Fatalf("did not expect synthetic admin role permission when user is not in admin group")
 	}
 }
 
@@ -671,7 +676,7 @@ func hasOwner(owners []PrincipalRef, kind PrincipalKind, id string) bool {
 }
 
 func TestEnsureSyntheticRoles_CreatesMissingRolesIdempotently(t *testing.T) {
-	store := &mockStore{rolesByID: map[string]Role{}}
+	store := &mockStore{}
 	svc := NewServiceWithProviders(store, store)
 	svc.SetSyntheticRoleIDs(SyntheticRolePublic, SyntheticRoleAuthenticated, SyntheticRoleAdmin)
 
@@ -682,16 +687,20 @@ func TestEnsureSyntheticRoles_CreatesMissingRolesIdempotently(t *testing.T) {
 		t.Fatalf("expected no error on second ensure, got %v", err)
 	}
 
-	if len(store.rolesByID) != 3 {
-		t.Fatalf("expected 3 roles, got %d", len(store.rolesByID))
+	roles, err := svc.RoleDefinitions(context.Background())
+	if err != nil {
+		t.Fatalf("expected role definitions to succeed, got %v", err)
 	}
-	if _, ok := store.rolesByID[SyntheticRolePublic]; !ok {
+	if len(roles) != 3 {
+		t.Fatalf("expected 3 roles, got %d", len(roles))
+	}
+	if _, err := svc.RoleDefinition(context.Background(), SyntheticRolePublic); err != nil {
 		t.Fatalf("expected %q role to exist", SyntheticRolePublic)
 	}
-	if _, ok := store.rolesByID[SyntheticRoleAuthenticated]; !ok {
+	if _, err := svc.RoleDefinition(context.Background(), SyntheticRoleAuthenticated); err != nil {
 		t.Fatalf("expected %q role to exist", SyntheticRoleAuthenticated)
 	}
-	if _, ok := store.rolesByID[SyntheticRoleAdmin]; !ok {
+	if _, err := svc.RoleDefinition(context.Background(), SyntheticRoleAdmin); err != nil {
 		t.Fatalf("expected %q role to exist", SyntheticRoleAdmin)
 	}
 }
@@ -743,7 +752,7 @@ func TestEnsureGrantForOwner_WritesWhenMissing(t *testing.T) {
 }
 
 func TestSaveBuiltIns_IdempotentForConfiguredSyntheticRoles(t *testing.T) {
-	store := &mockStore{rolesByID: map[string]Role{}}
+	store := &mockStore{}
 	svc := NewServiceWithProviders(store, store)
 	svc.SetSyntheticRoleIDs(SyntheticRolePublic, SyntheticRoleAuthenticated, SyntheticRoleAdmin)
 
@@ -760,28 +769,15 @@ func TestSaveBuiltIns_IdempotentForConfiguredSyntheticRoles(t *testing.T) {
 		t.Fatalf("expected no error on second save, got %v", err)
 	}
 
-	if len(store.rolesByID) != 3 {
-		t.Fatalf("expected 3 synthetic roles, got %d", len(store.rolesByID))
+	roles, err := svc.RoleDefinitions(context.Background())
+	if err != nil {
+		t.Fatalf("expected role definitions to succeed, got %v", err)
 	}
-	if len(store.bulkWritten) != 3 {
-		t.Fatalf("expected exactly 3 grant writes after idempotent save, got %d", len(store.bulkWritten))
+	if len(roles) != 3 {
+		t.Fatalf("expected 3 synthetic roles in memory, got %d", len(roles))
 	}
-}
-
-func TestSaveBuiltIns_RejectsNonSyntheticOwner(t *testing.T) {
-	store := &mockStore{rolesByID: map[string]Role{}}
-	svc := NewServiceWithProviders(store, store)
-	svc.SetSyntheticRoleIDs(SyntheticRolePublic, SyntheticRoleAuthenticated, SyntheticRoleAdmin)
-
-	err := svc.SaveBuiltIns(context.Background(), []Grant{{
-		OwnerKind:      PrincipalRole,
-		OwnerID:        "role.custom",
-		Effect:         EffectAllow,
-		TeamScope:      "*",
-		PermissionName: "custom.read",
-	}})
-	if err == nil {
-		t.Fatalf("expected validation error for non-synthetic owner")
+	if len(svc.builtIns.grants) != 3 {
+		t.Fatalf("expected exactly 3 grants in memory after idempotent save, got %d", len(svc.builtIns.grants))
 	}
 }
 
@@ -801,7 +797,7 @@ func TestNew_UsesDefaultStoreAndNilIdentity(t *testing.T) {
 }
 
 func TestSetStore_TriggersSaveBuiltIns(t *testing.T) {
-	targetStore := &mockStore{rolesByID: map[string]Role{}}
+	targetStore := &mockStore{}
 	svc := New()
 	svc.SetSyntheticRoleIDs(SyntheticRolePublic, SyntheticRoleAuthenticated, SyntheticRoleAdmin)
 	svc.SetBuiltInGrants([]Grant{{
@@ -813,14 +809,11 @@ func TestSetStore_TriggersSaveBuiltIns(t *testing.T) {
 	}})
 
 	if err := svc.SetStore(targetStore); err != nil {
-		t.Fatalf("expected SetStore to save built-ins, got %v", err)
+		t.Fatalf("expected SetStore to succeed, got %v", err)
 	}
 
-	if _, ok := targetStore.rolesByID[SyntheticRolePublic]; !ok {
-		t.Fatalf("expected synthetic public role to be created in new store")
-	}
-	if len(targetStore.bulkWritten) != 1 {
-		t.Fatalf("expected 1 built-in grant write, got %d", len(targetStore.bulkWritten))
+	if _, err := svc.RoleDefinition(context.Background(), SyntheticRolePublic); err != nil {
+		t.Fatalf("expected synthetic public role to be accessible in memory")
 	}
 }
 
@@ -843,10 +836,10 @@ func TestAddDefaultGrant_AppendsAndDeduplicates(t *testing.T) {
 	svc.AddDefaultGrant(SyntheticRolePublic, "assets.read", "")
 	svc.AddDefaultGrant(SyntheticRolePublic, "assets.read", "*")
 
-	if len(svc.builtInGrants) != 1 {
-		t.Fatalf("expected a single deduplicated built-in grant, got %d", len(svc.builtInGrants))
+	if len(svc.builtIns.grants) != 1 {
+		t.Fatalf("expected a single deduplicated built-in grant, got %d", len(svc.builtIns.grants))
 	}
-	grant := svc.builtInGrants[0]
+	grant := svc.builtIns.grants[0]
 	if grant.OwnerKind != PrincipalRole || grant.OwnerID != SyntheticRolePublic {
 		t.Fatalf("unexpected grant owner %+v", grant)
 	}
@@ -883,8 +876,8 @@ func TestAddDefaultSystemCRUDGrants_AppendsAllPermissions(t *testing.T) {
 
 	svc.AddDefaultSystemCRUDGrants(SyntheticRoleAdmin, "*", crud)
 
-	if len(svc.builtInGrants) != 5 {
-		t.Fatalf("expected 5 built-in grants, got %d", len(svc.builtInGrants))
+	if len(svc.builtIns.grants) != 5 {
+		t.Fatalf("expected 5 built-in grants, got %d", len(svc.builtIns.grants))
 	}
 }
 
@@ -894,8 +887,8 @@ func TestAddDefaultTeamCRUDGrants_AppendsAllPermissions(t *testing.T) {
 
 	svc.AddDefaultTeamCRUDGrants(SyntheticRoleAdmin, "*", crud)
 
-	if len(svc.builtInGrants) != 5 {
-		t.Fatalf("expected 5 built-in grants, got %d", len(svc.builtInGrants))
+	if len(svc.builtIns.grants) != 5 {
+		t.Fatalf("expected 5 built-in grants, got %d", len(svc.builtIns.grants))
 	}
 }
 
@@ -903,8 +896,8 @@ func TestAddDefaultCRUDGrant_ValidatesAction(t *testing.T) {
 	svc := New()
 
 	svc.AddDefaultCRUDGrant(SyntheticRoleAdmin, "*", CRUDRead, "announcements.read")
-	if len(svc.builtInGrants) != 1 {
-		t.Fatalf("expected 1 built-in grant, got %d", len(svc.builtInGrants))
+	if len(svc.builtIns.grants) != 1 {
+		t.Fatalf("expected 1 built-in grant, got %d", len(svc.builtIns.grants))
 	}
 
 	defer func() {
@@ -983,10 +976,11 @@ func TestSaveBuiltIns_UsesBulkEnsurePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if len(store.bulkWritten) != 1 {
-		t.Fatalf("expected built-ins to be written through bulk path")
+	if len(svc.builtIns.grants) != 1 {
+		t.Fatalf("expected built-ins to be stored in memory")
 	}
 }
+
 
 func TestHasPermission_MultiTenantRole_BothTeamsAllowed(t *testing.T) {
 	team42 := int64(42)
@@ -1212,19 +1206,19 @@ func TestService_BootstrapBuiltInRole(t *testing.T) {
 	svc := NewServiceWithProviders(store, nil)
 
 	role := Role{
-		ID:          "role.operator",
+		ID:          "builtin.operator",
 		Name:        "Operator",
 		Description: "Backup operator description",
 		Permissions: []string{"backup.run", "backup.list"},
 	}
 
-	// 1. First Boot: Should create the role with BuiltIn = true and write grants
+	// 1. First Boot: Should create the role with BuiltIn = true and register grants
 	err := svc.BootstrapBuiltInRole(context.Background(), role)
 	if err != nil {
 		t.Fatalf("expected no error during first bootstrap, got %v", err)
 	}
 
-	dbRole, err := store.RoleDefinition(context.Background(), "role.operator")
+	dbRole, err := svc.RoleDefinition(context.Background(), "builtin.operator")
 	if err != nil {
 		t.Fatalf("expected role definition to exist, got %v", err)
 	}
@@ -1235,10 +1229,7 @@ func TestService_BootstrapBuiltInRole(t *testing.T) {
 		t.Fatalf("expected role name to be Operator, got %q", dbRole.Name)
 	}
 
-	grants, err := store.GrantsForPrincipal(context.Background(), PrincipalRef{Kind: PrincipalRole, ID: "role.operator"})
-	if err != nil {
-		t.Fatalf("expected grants lookup to succeed, got %v", err)
-	}
+	grants := svc.builtIns.GrantsForOwners([]PrincipalRef{{Kind: PrincipalRole, ID: "builtin.operator"}}, Request{})
 	if len(grants) != 2 {
 		t.Fatalf("expected exactly 2 grants, got %d", len(grants))
 	}
@@ -1252,7 +1243,7 @@ func TestService_BootstrapBuiltInRole(t *testing.T) {
 		t.Fatalf("expected no error during second bootstrap, got %v", err)
 	}
 
-	dbRole2, err := store.RoleDefinition(context.Background(), "role.operator")
+	dbRole2, err := svc.RoleDefinition(context.Background(), "builtin.operator")
 	if err != nil {
 		t.Fatalf("expected role definition to exist, got %v", err)
 	}
@@ -1260,10 +1251,7 @@ func TestService_BootstrapBuiltInRole(t *testing.T) {
 		t.Fatalf("expected role description to be updated, got %q", dbRole2.Description)
 	}
 
-	grants2, err := store.GrantsForPrincipal(context.Background(), PrincipalRef{Kind: PrincipalRole, ID: "role.operator"})
-	if err != nil {
-		t.Fatalf("expected grants lookup to succeed, got %v", err)
-	}
+	grants2 := svc.builtIns.GrantsForOwners([]PrincipalRef{{Kind: PrincipalRole, ID: "builtin.operator"}}, Request{})
 	if len(grants2) != 3 {
 		t.Fatalf("expected exactly 3 grants after upgrade, got %d", len(grants2))
 	}

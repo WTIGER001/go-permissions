@@ -7,13 +7,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Service struct {
 	identity            IdentityProvider
 	permissions         PermissionStore
-	builtInGrants       []Grant
+	builtIns            *builtInRegistry
+	disabledCache       map[string]bool
+	disabledCacheAt     time.Time
+	disabledCacheMu     sync.RWMutex
 	publicRoleID        string
 	authenticatedRoleID string
 	adminRoleID         string
@@ -22,7 +26,10 @@ type Service struct {
 
 // New creates a service with a nil identity provider and an in-memory default store.
 func New() *Service {
-	service := &Service{permissions: newBootstrapStore()}
+	service := &Service{
+		permissions: newBootstrapStore(),
+		builtIns:    newBuiltInRegistry(),
+	}
 	service.applyDefaultSyntheticRoleIDs()
 	return service
 }
@@ -35,14 +42,10 @@ func NewService(permissionStore PermissionStore, identityProvider IdentityProvid
 	service := &Service{
 		identity:    identityProvider,
 		permissions: permissionStore,
+		builtIns:    newBuiltInRegistry(),
 	}
 	service.applyDefaultSyntheticRoleIDs()
 	return service
-}
-
-// Store returns the underlying PermissionStore.
-func (s *Service) Store() PermissionStore {
-	return s.permissions
 }
 
 // SetIdentityProvider updates the identity provider used by permission checks.
@@ -56,13 +59,13 @@ func (s *Service) SetStore(store PermissionStore) error {
 		store = newBootstrapStore()
 	}
 	s.permissions = store
-
-	return s.SaveBuiltIns(context.Background(), s.builtInGrants)
+	s.invalidateDisabledCache()
+	return nil
 }
 
 // SetBuiltInGrants configures built-in grants used by SaveBuiltIns and SetStore bootstrap.
 func (s *Service) SetBuiltInGrants(grants []Grant) {
-	s.builtInGrants = cloneGrantSlice(grants)
+	_ = s.SaveBuiltIns(context.Background(), grants)
 }
 
 // AddDefaultGrant appends an allow grant to built-in defaults and deduplicates equivalent entries.
@@ -81,6 +84,10 @@ func (s *Service) AddDefaultGrant(roleID, permission, teamScope string) {
 		teamScope = "*"
 	}
 
+	if !strings.HasPrefix(roleID, BuiltInPrefix) {
+		roleID = BuiltInPrefix + roleID
+	}
+
 	grant := Grant{
 		OwnerKind:      PrincipalRole,
 		OwnerID:        roleID,
@@ -89,13 +96,7 @@ func (s *Service) AddDefaultGrant(roleID, permission, teamScope string) {
 		PermissionName: permission,
 	}
 
-	for _, existing := range s.builtInGrants {
-		if grantsEquivalent(existing, grant) {
-			return
-		}
-	}
-
-	s.builtInGrants = append(s.builtInGrants, grant)
+	_ = s.builtIns.AddGrant(grant)
 }
 
 // AddDefaultSystemCRUDGrants adds default allow grants for all system CRUD permissions.
@@ -394,12 +395,7 @@ func (s *Service) evaluatePermission(ctx context.Context, req Request, fieldPath
 			return false, err
 		}
 
-		roleOwners := make([]PrincipalRef, len(roleIDs))
-		for i, rID := range roleIDs {
-			roleOwners[i] = PrincipalRef{Kind: PrincipalRole, ID: rID}
-		}
-
-		roleGrants, err := s.permissions.GrantsForOwners(ctx, roleOwners, req)
+		roleGrants, err := s.fetchRoleGrants(ctx, roleIDs, req)
 		if err != nil {
 			return false, err
 		}
@@ -442,21 +438,111 @@ func (s *Service) evaluatePermission(ctx context.Context, req Request, fieldPath
 	return allowed, nil
 }
 
+func (s *Service) fetchRoleGrants(ctx context.Context, roleIDs []string, req Request) ([]Grant, error) {
+	var builtInOwners []PrincipalRef
+	var customOwners []PrincipalRef
+	for _, rID := range roleIDs {
+		ref := PrincipalRef{Kind: PrincipalRole, ID: rID}
+		if strings.HasPrefix(rID, BuiltInPrefix) {
+			builtInOwners = append(builtInOwners, ref)
+		} else {
+			customOwners = append(customOwners, ref)
+		}
+	}
+
+	var roleGrants []Grant
+	if len(builtInOwners) > 0 {
+		roleGrants = append(roleGrants, s.builtIns.GrantsForOwners(builtInOwners, req)...)
+	}
+	if len(customOwners) > 0 {
+		cg, err := s.permissions.GrantsForOwners(ctx, customOwners, req)
+		if err != nil {
+			return nil, err
+		}
+		roleGrants = append(roleGrants, cg...)
+	}
+	return roleGrants, nil
+}
+
+func (s *Service) getDisabledBuiltInRoles(ctx context.Context) (map[string]bool, error) {
+	s.disabledCacheMu.RLock()
+	if time.Since(s.disabledCacheAt) < 5*time.Second && s.disabledCache != nil {
+		cacheCopy := make(map[string]bool, len(s.disabledCache))
+		for k, v := range s.disabledCache {
+			cacheCopy[k] = v
+		}
+		s.disabledCacheMu.RUnlock()
+		return cacheCopy, nil
+	}
+	s.disabledCacheMu.RUnlock()
+
+	s.disabledCacheMu.Lock()
+	defer s.disabledCacheMu.Unlock()
+
+	if time.Since(s.disabledCacheAt) < 5*time.Second && s.disabledCache != nil {
+		cacheCopy := make(map[string]bool, len(s.disabledCache))
+		for k, v := range s.disabledCache {
+			cacheCopy[k] = v
+		}
+		return cacheCopy, nil
+	}
+
+	disabledList, err := s.permissions.DisabledBuiltInRoles(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	cache := make(map[string]bool, len(disabledList))
+	for _, id := range disabledList {
+		cache[id] = true
+	}
+	s.disabledCache = cache
+	s.disabledCacheAt = time.Now()
+
+	cacheCopy := make(map[string]bool, len(cache))
+	for k, v := range cache {
+		cacheCopy[k] = v
+	}
+	return cacheCopy, nil
+}
+
+func (s *Service) invalidateDisabledCache() {
+	s.disabledCacheMu.Lock()
+	defer s.disabledCacheMu.Unlock()
+	s.disabledCacheAt = time.Time{}
+}
+
 // expandRolesCached calls ExpandRoles and memoises the result so that multiple
 // assignments sharing the same root role only hit the store once per request.
 func (s *Service) expandRolesCached(ctx context.Context, rootRoleID string, cache map[string][]string) ([]string, error) {
 	if cached, ok := cache[rootRoleID]; ok {
 		return cached, nil
 	}
-	roleIDs, err := s.permissions.ExpandRoles(ctx, []string{rootRoleID})
+
+	disabledMap, err := s.getDisabledBuiltInRoles(ctx)
 	if err != nil {
-		return nil, err
+		disabledMap = map[string]bool{}
 	}
-	filtered := make([]string, 0, len(roleIDs))
-	for _, rID := range roleIDs {
-		roleDef, err := s.permissions.RoleDefinition(ctx, rID)
+
+	var expanded []string
+	if strings.HasPrefix(rootRoleID, BuiltInPrefix) {
+		expanded = s.builtIns.ExpandRoles([]string{rootRoleID})
+	} else {
+		dbExpanded, err := s.permissions.ExpandRoles(ctx, []string{rootRoleID})
+		if err != nil {
+			return nil, err
+		}
+		expanded = s.builtIns.ExpandRoles(dbExpanded)
+	}
+
+	filtered := make([]string, 0, len(expanded))
+	for _, rID := range expanded {
+		if disabledMap[rID] {
+			continue
+		}
+		roleDef, err := s.RoleDefinition(ctx, rID)
 		if err == nil && roleDef.IsDisabled {
-			continue // Skip disabled roles!
+			continue
 		}
 		filtered = append(filtered, rID)
 	}
@@ -542,12 +628,7 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 			return nil, err
 		}
 
-		roleOwners := make([]PrincipalRef, len(roleIDs))
-		for i, rID := range roleIDs {
-			roleOwners[i] = PrincipalRef{Kind: PrincipalRole, ID: rID}
-		}
-
-		roleGrants, err := s.permissions.GrantsForOwners(ctx, roleOwners, baseReq)
+		roleGrants, err := s.fetchRoleGrants(ctx, roleIDs, baseReq)
 		if err != nil {
 			return nil, err
 		}
@@ -1077,27 +1158,101 @@ func (s *Service) EnsureGrantForOwner(ctx context.Context, grant Grant) error {
 	return s.permissions.CreateGrant(ctx, grant)
 }
 
+// DisableBuiltInRole disables a built-in role at runtime and invalidates the local cache.
+func (s *Service) DisableBuiltInRole(ctx context.Context, roleID string) error {
+	if err := s.permissions.DisableBuiltInRole(ctx, roleID); err != nil {
+		return err
+	}
+	s.invalidateDisabledCache()
+	return nil
+}
+
+// EnableBuiltInRole re-enables a built-in role at runtime and invalidates the local cache.
+func (s *Service) EnableBuiltInRole(ctx context.Context, roleID string) error {
+	if err := s.permissions.EnableBuiltInRole(ctx, roleID); err != nil {
+		return err
+	}
+	s.invalidateDisabledCache()
+	return nil
+}
+
+// DisabledBuiltInRoles returns all currently disabled built-in roles.
+func (s *Service) DisabledBuiltInRoles(ctx context.Context) ([]string, error) {
+	return s.permissions.DisabledBuiltInRoles(ctx)
+}
+
+// RoleDefinitions returns all active role definitions, combining in-memory built-in roles and store custom roles.
+func (s *Service) RoleDefinitions(ctx context.Context) ([]Role, error) {
+	disabledMap, err := s.getDisabledBuiltInRoles(ctx)
+	if err != nil {
+		disabledMap = map[string]bool{}
+	}
+
+	builtInRoles := s.builtIns.Roles()
+	rolesByID := map[string]Role{}
+	for _, r := range builtInRoles {
+		if disabledMap[r.ID] {
+			r.IsDisabled = true
+		}
+		rolesByID[r.ID] = r
+	}
+
+	dbRoles, err := s.permissions.RoleDefinitions(ctx)
+	if err == nil {
+		for _, r := range dbRoles {
+			rolesByID[r.ID] = r
+		}
+	}
+
+	result := make([]Role, 0, len(rolesByID))
+	for _, r := range rolesByID {
+		result = append(result, r)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result, nil
+}
+
+// RoleDefinition retrieves a single role definition by ID.
+func (s *Service) RoleDefinition(ctx context.Context, roleID string) (Role, error) {
+	if role, ok := s.builtIns.Role(roleID); ok {
+		disabledMap, _ := s.getDisabledBuiltInRoles(ctx)
+		if disabledMap[roleID] {
+			role.IsDisabled = true
+		}
+		return role, nil
+	}
+	return s.permissions.RoleDefinition(ctx, roleID)
+}
+
+// CreateRole registers a role definition. Built-in roles (prefixed with builtin.) are registered in memory, while custom roles are created in the store.
+func (s *Service) CreateRole(ctx context.Context, role Role) error {
+	if strings.HasPrefix(role.ID, BuiltInPrefix) {
+		return s.builtIns.RegisterRole(role)
+	}
+	return s.permissions.CreateRole(ctx, role)
+}
+
+// AddRoleInheritance declares that parentRoleID inherits all permissions of childRoleID.
+func (s *Service) AddRoleInheritance(ctx context.Context, parentRoleID, childRoleID string) error {
+	if strings.HasPrefix(parentRoleID, BuiltInPrefix) && strings.HasPrefix(childRoleID, BuiltInPrefix) {
+		return s.builtIns.AddRoleInheritance(parentRoleID, childRoleID)
+	}
+	return s.permissions.AddRoleInheritance(ctx, parentRoleID, childRoleID)
+}
+
 // SaveBuiltIns performs idempotent startup seeding for configured synthetic roles and grants.
-// It creates missing synthetic roles and then ensures each synthetic grant exists once.
 func (s *Service) SaveBuiltIns(ctx context.Context, grants []Grant) error {
 	if err := s.EnsureSyntheticRoles(ctx); err != nil {
 		return err
 	}
 
-	allowedRoleIDs := s.syntheticRoleIDSet()
-	eligible := make([]Grant, 0, len(grants))
 	for _, grant := range grants {
 		if grant.OwnerKind != PrincipalRole {
 			return fmt.Errorf("save built-ins only supports role-owned grants")
 		}
-		if !allowedRoleIDs[grant.OwnerID] {
-			return fmt.Errorf("grant owner %q is not a configured synthetic role", grant.OwnerID)
+		if err := s.builtIns.AddGrant(grant); err != nil {
+			return err
 		}
-		eligible = append(eligible, grant)
-	}
-
-	if err := s.EnsureGrantsForOwners(ctx, eligible); err != nil {
-		return err
 	}
 
 	return nil
@@ -1118,7 +1273,7 @@ func (s *Service) syntheticRoleIDSet() map[string]bool {
 	return set
 }
 
-func (s *Service) ensureRoleExists(ctx context.Context, role Role) error {
+func (s *Service) ensureRoleExists(_ context.Context, role Role) error {
 	if role.ID == "" {
 		return fmt.Errorf("role ID is required")
 	}
@@ -1126,70 +1281,40 @@ func (s *Service) ensureRoleExists(ctx context.Context, role Role) error {
 		return fmt.Errorf("role name is required")
 	}
 
-	existing, err := s.permissions.RoleDefinition(ctx, role.ID)
-	if err == nil && existing.ID == role.ID {
-		return nil
+	if strings.HasPrefix(role.ID, BuiltInPrefix) {
+		return s.builtIns.RegisterRole(role)
 	}
-
-	if err := s.permissions.CreateRole(ctx, role); err != nil {
-		// Another writer may have created it in parallel; confirm presence and treat as success.
-		confirm, confirmErr := s.permissions.RoleDefinition(ctx, role.ID)
-		if confirmErr == nil && confirm.ID == role.ID {
-			return nil
-		}
-		return err
-	}
-
-	return nil
+	return s.permissions.CreateRole(context.Background(), role)
 }
 
-// BootstrapBuiltInRole idempotently registers a system-managed (built-in) role definition and seeds its default permissions.
-// If the role already exists, its metadata (Name, Description, VariableSpec, BuiltIn) is updated to support release upgrades.
-func (s *Service) BootstrapBuiltInRole(ctx context.Context, role Role) error {
+// BootstrapBuiltInRole idempotently registers a system-managed (built-in) role definition and seeds its default permissions in memory.
+func (s *Service) BootstrapBuiltInRole(_ context.Context, role Role) error {
 	if role.ID == "" {
 		return fmt.Errorf("role ID is required")
 	}
 	if role.Name == "" {
 		return fmt.Errorf("role name is required")
 	}
-
-	role.BuiltIn = true // Always force built-in flag to true
-
-	existing, err := s.permissions.RoleDefinition(ctx, role.ID)
-	if err != nil {
-		// Create the role
-		if err := s.permissions.CreateRole(ctx, role); err != nil {
-			// Check if created concurrently
-			confirm, confirmErr := s.permissions.RoleDefinition(ctx, role.ID)
-			if confirmErr != nil || confirm.ID != role.ID {
-				return fmt.Errorf("failed to create built-in role %s: %w", role.ID, err)
-			}
-		}
-	} else {
-		// Update existing metadata
-		existing.Name = role.Name
-		existing.Description = role.Description
-		existing.VariableSpec = role.VariableSpec
-		existing.BuiltIn = true
-		if err := s.permissions.UpdateRole(ctx, existing); err != nil {
-			return fmt.Errorf("failed to update built-in role %s: %w", role.ID, err)
-		}
+	if !strings.HasPrefix(role.ID, BuiltInPrefix) {
+		role.ID = BuiltInPrefix + role.ID
 	}
 
-	// Sync default grants
-	grants := make([]Grant, len(role.Permissions))
-	for i, perm := range role.Permissions {
-		grants[i] = Grant{
+	role.BuiltIn = true
+	if err := s.builtIns.RegisterRole(role); err != nil {
+		return fmt.Errorf("failed to register built-in role %s: %w", role.ID, err)
+	}
+
+	for _, perm := range role.Permissions {
+		grant := Grant{
 			OwnerKind:      PrincipalRole,
 			OwnerID:        role.ID,
 			Effect:         EffectAllow,
-			TeamScope:      "*", // Global within the role container
+			TeamScope:      "*",
 			PermissionName: perm,
 		}
-	}
-
-	if err := s.EnsureGrantsForOwners(ctx, grants); err != nil {
-		return fmt.Errorf("failed to seed grants for built-in role %s: %w", role.ID, err)
+		if err := s.builtIns.AddGrant(grant); err != nil {
+			return fmt.Errorf("failed to seed grant for built-in role %s: %w", role.ID, err)
+		}
 	}
 
 	return nil

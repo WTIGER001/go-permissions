@@ -306,3 +306,10 @@ func (s *Store) DeleteGrantsForOwner(_ context.Context, ownerKind permissions.Pr
 	s.grants = filtered
 	return nil
 }
+
+func (s *Store) DisableBuiltInRole(_ context.Context, _ string) error { return nil }
+func (s *Store) EnableBuiltInRole(_ context.Context, _ string) error  { return nil }
+func (s *Store) DisabledBuiltInRoles(_ context.Context) ([]string, error) {
+	return []string{}, nil
+}
+

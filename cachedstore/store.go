@@ -224,6 +224,27 @@ func (s *Store) DeleteGrantsForOwner(ctx context.Context, ownerKind permissions.
 	return nil
 }
 
+func (s *Store) DisableBuiltInRole(ctx context.Context, roleID string) error {
+	if err := s.base.DisableBuiltInRole(ctx, roleID); err != nil {
+		return err
+	}
+	s.InvalidateAll()
+	return nil
+}
+
+func (s *Store) EnableBuiltInRole(ctx context.Context, roleID string) error {
+	if err := s.base.EnableBuiltInRole(ctx, roleID); err != nil {
+		return err
+	}
+	s.InvalidateAll()
+	return nil
+}
+
+func (s *Store) DisabledBuiltInRoles(ctx context.Context) ([]string, error) {
+	return s.base.DisabledBuiltInRoles(ctx)
+}
+
+
 func makeKey(prefix string, value any) string {
 	encoded, err := json.Marshal(value)
 	if err != nil {

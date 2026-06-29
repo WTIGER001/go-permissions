@@ -104,6 +104,10 @@ func (examplePolicyStore) UpdateRole(_ context.Context, _ Role) error   { return
 func (examplePolicyStore) DeleteRole(_ context.Context, _ string) error { return nil }
 func (examplePolicyStore) AddRoleInheritance(_ context.Context, _, _ string) error { return nil }
 func (examplePolicyStore) DeleteGrantsForOwner(_ context.Context, _ PrincipalKind, _ string) error { return nil }
+func (examplePolicyStore) DisableBuiltInRole(_ context.Context, _ string) error { return nil }
+func (examplePolicyStore) EnableBuiltInRole(_ context.Context, _ string) error  { return nil }
+func (examplePolicyStore) DisabledBuiltInRoles(_ context.Context) ([]string, error) { return nil, nil }
+
 
 func ExampleNewServiceWithIdentity_customIdentityAdapter() {
 	identity := exampleIdentityAdapter{

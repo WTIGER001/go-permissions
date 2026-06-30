@@ -71,14 +71,14 @@ func SetupRoles(svc *permissions.Service) {
 	ctx := context.Background()
 
 	// 1. Register Built-In Feature Roles (IDs must start with "builtin.")
-	svc.BootstrapBuiltInRole(ctx, permissions.Role{
+	svc.AddBuiltInRole(ctx, permissions.Role{
 		ID:          "builtin.team-member",
 		Name:        "Team Member",
 		Description: "Base permissions for standard team members",
 		Permissions: []string{"team.dashboard.read", "team.profile.update"},
 	})
 
-	svc.BootstrapBuiltInRole(ctx, permissions.Role{
+	svc.AddBuiltInRole(ctx, permissions.Role{
 		ID:          "builtin.backup-operator",
 		Name:        "Backup Operator",
 		Description: "Allows managing and executing system backups",

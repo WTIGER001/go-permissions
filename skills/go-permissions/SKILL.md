@@ -60,7 +60,7 @@ svc := permissions.NewServiceWithIdentity(identityAdapter, postgresStore)
 svc.SetAdminGroupID("group.admins")
 
 // Register built-in feature role
-svc.BootstrapBuiltInRole(ctx, permissions.Role{
+svc.AddBuiltInRole(ctx, permissions.Role{
     ID:          "builtin.backup-operator",
     Name:        "Backup Operator",
     Permissions: []string{"backup.run", "backup.list"},

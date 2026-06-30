@@ -58,7 +58,7 @@ func init() {
 
 Clients interact exclusively with `permissions.Service` rather than accessing the underlying store directly.
 
-### 2.1 Bootstrap Built-In Feature Roles
+### 2.1 Add Built-In Feature Roles
 Built-in feature role IDs **must begin with the prefix `builtin.`**. They are stored in memory and require no SQL seeding:
 
 ```go
@@ -71,7 +71,7 @@ import (
 
 func SeedBuiltInRoles(ctx context.Context, svc *permissions.Service) error {
 	// Register a built-in role directly in memory
-	err := svc.BootstrapBuiltInRole(ctx, permissions.Role{
+	err := svc.AddBuiltInRole(ctx, permissions.Role{
 		ID:          "builtin.finops-viewer",
 		Name:        "FinOps Viewer",
 		Description: "Allows viewing financial reports",

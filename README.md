@@ -47,7 +47,7 @@ func main() {
 	svc := permissions.New()
 
 	// 1. Register a built-in feature role (must start with "builtin.")
-	svc.BootstrapBuiltInRole(ctx, permissions.Role{
+	svc.AddBuiltInRole(ctx, permissions.Role{
 		ID:          "builtin.editor",
 		Name:        "Editor",
 		Permissions: []string{"article.create", "article.edit"},

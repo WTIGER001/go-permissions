@@ -64,7 +64,7 @@ var (
 )
 
 func Init(svc *permissions.Service) {
-	svc.BootstrapBuiltInRole(context.Background(), RoleBackupOperator)
+	svc.AddBuiltInRole(context.Background(), RoleBackupOperator)
 }
 ```
 

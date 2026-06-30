@@ -1201,7 +1201,7 @@ func TestHasPermission_DisabledRoleInherited(t *testing.T) {
 	}
 }
 
-func TestService_BootstrapBuiltInRole(t *testing.T) {
+func TestService_AddBuiltInRole(t *testing.T) {
 	store := newBootstrapStore()
 	svc := NewServiceWithProviders(store, nil)
 
@@ -1213,7 +1213,7 @@ func TestService_BootstrapBuiltInRole(t *testing.T) {
 	}
 
 	// 1. First Boot: Should create the role with BuiltIn = true and register grants
-	err := svc.BootstrapBuiltInRole(context.Background(), role)
+	err := svc.AddBuiltInRole(context.Background(), role)
 	if err != nil {
 		t.Fatalf("expected no error during first bootstrap, got %v", err)
 	}
@@ -1238,7 +1238,7 @@ func TestService_BootstrapBuiltInRole(t *testing.T) {
 	role.Description = "Updated description"
 	role.Permissions = append(role.Permissions, "backup.download")
 
-	err = svc.BootstrapBuiltInRole(context.Background(), role)
+	err = svc.AddBuiltInRole(context.Background(), role)
 	if err != nil {
 		t.Fatalf("expected no error during second bootstrap, got %v", err)
 	}
@@ -1254,5 +1254,164 @@ func TestService_BootstrapBuiltInRole(t *testing.T) {
 	grants2 := svc.builtIns.GrantsForOwners([]PrincipalRef{{Kind: PrincipalRole, ID: "builtin.operator"}}, Request{})
 	if len(grants2) != 3 {
 		t.Fatalf("expected exactly 3 grants after upgrade, got %d", len(grants2))
+	}
+}
+
+func TestService_ProxyMethods(t *testing.T) {
+	store := newBootstrapStore()
+	svc := NewServiceWithProviders(store, nil)
+
+	ctx := context.Background()
+
+	// Test GetStore
+	if svc.GetStore() != store {
+		t.Errorf("expected GetStore to return the underlying store")
+	}
+
+	// Test AddBuiltInRole
+	builtInRole := Role{
+		ID:          "builtin.editor",
+		Name:        "Editor",
+		Permissions: []string{"write", "read"},
+	}
+	if err := svc.AddBuiltInRole(ctx, builtInRole); err != nil {
+		t.Fatalf("AddBuiltInRole failed: %v", err)
+	}
+
+	// Test CreateRole & UpdateRole & DeleteRole for custom role
+	customRole := Role{
+		ID:   "role.custom",
+		Name: "Custom Role",
+	}
+	if err := svc.CreateRole(ctx, customRole); err != nil {
+		t.Fatalf("CreateRole failed: %v", err)
+	}
+
+	customRole.Name = "Updated Custom Role"
+	if err := svc.UpdateRole(ctx, customRole); err != nil {
+		t.Fatalf("UpdateRole failed: %v", err)
+	}
+
+	// Built-in role updates/deletions should fail
+	if err := svc.UpdateRole(ctx, builtInRole); err == nil {
+		t.Error("expected error updating built-in role")
+	}
+	if err := svc.DeleteRole(ctx, builtInRole.ID); err == nil {
+		t.Error("expected error deleting built-in role")
+	}
+
+	// Test AssignRole and RoleAssignmentsForPrincipal
+	principal := PrincipalRef{Kind: PrincipalUser, ID: "u-1"}
+	if err := svc.AssignRole(ctx, principal, "role.custom", nil); err != nil {
+		t.Fatalf("AssignRole failed: %v", err)
+	}
+
+	assignments, err := svc.RoleAssignmentsForPrincipal(ctx, principal)
+	if err != nil {
+		t.Fatalf("RoleAssignmentsForPrincipal failed: %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].RoleID != "role.custom" {
+		t.Errorf("expected assignment to role.custom, got %+v", assignments)
+	}
+
+	// Test CreateGrant & GrantsForPrincipal & GrantsForOwners
+	customGrant := Grant{
+		OwnerKind:      PrincipalUser,
+		OwnerID:        "u-1",
+		Effect:         EffectAllow,
+		TeamScope:      "*",
+		PermissionName: "custom.perm",
+	}
+	if err := svc.CreateGrant(ctx, customGrant); err != nil {
+		t.Fatalf("CreateGrant for custom principal failed: %v", err)
+	}
+
+	// Create a built-in grant (should go to memory)
+	builtInGrant := Grant{
+		OwnerKind:      PrincipalRole,
+		OwnerID:        "builtin.editor",
+		Effect:         EffectAllow,
+		TeamScope:      "*",
+		PermissionName: "builtin.perm",
+	}
+	if err := svc.CreateGrant(ctx, builtInGrant); err != nil {
+		t.Fatalf("CreateGrant for built-in principal failed: %v", err)
+	}
+
+	// Fetch via GrantsForPrincipal
+	gPrincipal, err := svc.GrantsForPrincipal(ctx, principal)
+	if err != nil {
+		t.Fatalf("GrantsForPrincipal failed: %v", err)
+	}
+	if len(gPrincipal) != 1 || gPrincipal[0].PermissionName != "custom.perm" {
+		t.Errorf("expected custom.perm grant, got %+v", gPrincipal)
+	}
+
+	gBuiltin, err := svc.GrantsForPrincipal(ctx, PrincipalRef{Kind: PrincipalRole, ID: "builtin.editor"})
+	if err != nil {
+		t.Fatalf("GrantsForPrincipal failed: %v", err)
+	}
+	// Note: 2 permissions from AddBuiltInRole ("write", "read") + 1 from CreateGrant ("builtin.perm") = 3 grants
+	if len(gBuiltin) != 3 {
+		t.Errorf("expected 3 grants for built-in role, got %d", len(gBuiltin))
+	}
+
+	// Fetch via GrantsForOwners
+	owners := []PrincipalRef{principal, {Kind: PrincipalRole, ID: "builtin.editor"}}
+	gOwners, err := svc.GrantsForOwners(ctx, owners, Request{})
+	if err != nil {
+		t.Fatalf("GrantsForOwners failed: %v", err)
+	}
+	if len(gOwners) != 4 { // 1 custom + 3 built-in
+		t.Errorf("expected 4 grants total, got %d", len(gOwners))
+	}
+
+	// Test PrincipalsWithGrant
+	hits, err := svc.PrincipalsWithGrant(ctx, Request{Perm: "custom.perm"})
+	if err != nil {
+		t.Fatalf("PrincipalsWithGrant failed: %v", err)
+	}
+	if len(hits) != 1 || hits[0].ID != "u-1" {
+		t.Errorf("expected principal u-1 hit, got %+v", hits)
+	}
+
+	// Test ExpandRoles
+	// Add custom role inheritance: role.custom inherits builtin.editor
+	if err := svc.AddRoleInheritance(ctx, "role.custom", "builtin.editor"); err != nil {
+		t.Fatalf("AddRoleInheritance failed: %v", err)
+	}
+	expanded, err := svc.ExpandRoles(ctx, []string{"role.custom"})
+	if err != nil {
+		t.Fatalf("ExpandRoles failed: %v", err)
+	}
+	// Should expand to role.custom and builtin.editor
+	expectedRoles := map[string]bool{"role.custom": true, "builtin.editor": true}
+	for _, r := range expanded {
+		delete(expectedRoles, r)
+	}
+	if len(expectedRoles) != 0 {
+		t.Errorf("ExpandRoles did not return expected roles, remaining: %+v", expectedRoles)
+	}
+
+	// Test DeleteGrantsForOwner
+	if err := svc.DeleteGrantsForOwner(ctx, PrincipalUser, "u-1"); err != nil {
+		t.Fatalf("DeleteGrantsForOwner failed: %v", err)
+	}
+	gPrincipal2, err := svc.GrantsForPrincipal(ctx, principal)
+	if err != nil {
+		t.Fatalf("GrantsForPrincipal failed: %v", err)
+	}
+	if len(gPrincipal2) != 0 {
+		t.Errorf("expected 0 grants after delete, got %d", len(gPrincipal2))
+	}
+
+	// Deleting built-in grants should fail
+	if err := svc.DeleteGrantsForOwner(ctx, PrincipalRole, "builtin.editor"); err == nil {
+		t.Error("expected error deleting grants for built-in role")
+	}
+
+	// Test DeleteRole for custom role
+	if err := svc.DeleteRole(ctx, "role.custom"); err != nil {
+		t.Fatalf("DeleteRole failed: %v", err)
 	}
 }

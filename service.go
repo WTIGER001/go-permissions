@@ -178,7 +178,7 @@ func NewServiceWithIdentity(identity IdentityProvider, permissionStore Permissio
 }
 
 func (s *Service) AllowUser(ctx context.Context, userID, permission string, objectID *string) error {
-	return s.createGrant(ctx, Grant{
+	return s.CreateGrant(ctx, Grant{
 		OwnerKind:      PrincipalUser,
 		OwnerID:        userID,
 		Effect:         EffectAllow,
@@ -189,7 +189,7 @@ func (s *Service) AllowUser(ctx context.Context, userID, permission string, obje
 }
 
 func (s *Service) AllowUserUntil(ctx context.Context, userID, permission string, objectID *string, expiresAt time.Time) error {
-	return s.createGrant(ctx, Grant{
+	return s.CreateGrant(ctx, Grant{
 		OwnerKind:      PrincipalUser,
 		OwnerID:        userID,
 		Effect:         EffectAllow,
@@ -208,7 +208,7 @@ func (s *Service) AllowUserFor(ctx context.Context, userID, permission string, o
 }
 
 func (s *Service) DenyUser(ctx context.Context, userID, permission string, objectID *string) error {
-	return s.createGrant(ctx, Grant{
+	return s.CreateGrant(ctx, Grant{
 		OwnerKind:      PrincipalUser,
 		OwnerID:        userID,
 		Effect:         EffectDeny,
@@ -219,7 +219,7 @@ func (s *Service) DenyUser(ctx context.Context, userID, permission string, objec
 }
 
 func (s *Service) DenyUserUntil(ctx context.Context, userID, permission string, objectID *string, expiresAt time.Time) error {
-	return s.createGrant(ctx, Grant{
+	return s.CreateGrant(ctx, Grant{
 		OwnerKind:      PrincipalUser,
 		OwnerID:        userID,
 		Effect:         EffectDeny,
@@ -238,7 +238,7 @@ func (s *Service) DenyUserFor(ctx context.Context, userID, permission string, ob
 }
 
 func (s *Service) AllowRole(ctx context.Context, roleID, permission string, objectID *string) error {
-	return s.createGrant(ctx, Grant{
+	return s.CreateGrant(ctx, Grant{
 		OwnerKind:      PrincipalRole,
 		OwnerID:        roleID,
 		Effect:         EffectAllow,
@@ -249,7 +249,7 @@ func (s *Service) AllowRole(ctx context.Context, roleID, permission string, obje
 }
 
 func (s *Service) AllowRoleUntil(ctx context.Context, roleID, permission string, objectID *string, expiresAt time.Time) error {
-	return s.createGrant(ctx, Grant{
+	return s.CreateGrant(ctx, Grant{
 		OwnerKind:      PrincipalRole,
 		OwnerID:        roleID,
 		Effect:         EffectAllow,
@@ -1000,7 +1000,8 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func (s *Service) createGrant(ctx context.Context, grant Grant) error {
+// CreateGrant registers a single grant. Built-in grants (where OwnerKind is PrincipalRole and OwnerID has prefix builtin.) are registered in memory, while custom grants are created in the store.
+func (s *Service) CreateGrant(ctx context.Context, grant Grant) error {
 	if grant.OwnerID == "" {
 		return fmt.Errorf("owner ID is required")
 	}
@@ -1009,6 +1010,10 @@ func (s *Service) createGrant(ctx context.Context, grant Grant) error {
 	}
 	if grant.TeamScope == "" {
 		return fmt.Errorf("team scope is required")
+	}
+
+	if grant.OwnerKind == PrincipalRole && strings.HasPrefix(grant.OwnerID, BuiltInPrefix) {
+		return s.builtIns.AddGrant(grant)
 	}
 
 	return s.permissions.CreateGrant(ctx, grant)
@@ -1287,8 +1292,8 @@ func (s *Service) ensureRoleExists(_ context.Context, role Role) error {
 	return s.permissions.CreateRole(context.Background(), role)
 }
 
-// BootstrapBuiltInRole idempotently registers a system-managed (built-in) role definition and seeds its default permissions in memory.
-func (s *Service) BootstrapBuiltInRole(_ context.Context, role Role) error {
+// AddBuiltInRole idempotently registers a system-managed (built-in) role definition and seeds its default permissions in memory.
+func (s *Service) AddBuiltInRole(_ context.Context, role Role) error {
 	if role.ID == "" {
 		return fmt.Errorf("role ID is required")
 	}
@@ -1318,6 +1323,142 @@ func (s *Service) BootstrapBuiltInRole(_ context.Context, role Role) error {
 	}
 
 	return nil
+}
+
+// GetStore returns the underlying PermissionStore.
+// Direct interaction with the store is generally not recommended as it bypasses built-in role verification and caching.
+func (s *Service) GetStore() PermissionStore {
+	return s.permissions
+}
+
+// UpdateRole updates a role definition. Returns an error if the role is a built-in role.
+func (s *Service) UpdateRole(ctx context.Context, role Role) error {
+	if strings.HasPrefix(role.ID, BuiltInPrefix) {
+		return fmt.Errorf("cannot update built-in role: %s", role.ID)
+	}
+	return s.permissions.UpdateRole(ctx, role)
+}
+
+// DeleteRole deletes a role definition. Returns an error if the role is a built-in role.
+func (s *Service) DeleteRole(ctx context.Context, roleID string) error {
+	if strings.HasPrefix(roleID, BuiltInPrefix) {
+		return fmt.Errorf("cannot delete built-in role: %s", roleID)
+	}
+	return s.permissions.DeleteRole(ctx, roleID)
+}
+
+// RoleAssignmentsForPrincipal retrieves role assignments for the specified principal.
+func (s *Service) RoleAssignmentsForPrincipal(ctx context.Context, principal PrincipalRef) ([]RoleAssignment, error) {
+	return s.permissions.RoleAssignmentsForPrincipal(ctx, principal)
+}
+
+// AssignRole assigns a role to a principal.
+func (s *Service) AssignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
+	return s.permissions.AssignRole(ctx, principal, roleID, bindingValues)
+}
+
+// GrantsForPrincipal retrieves active grants for the specified principal.
+// If the principal is a built-in role, it fetches from the in-memory built-in registry.
+// Otherwise, it queries the database store.
+func (s *Service) GrantsForPrincipal(ctx context.Context, principal PrincipalRef) ([]Grant, error) {
+	if principal.Kind == PrincipalRole && strings.HasPrefix(principal.ID, BuiltInPrefix) {
+		return s.builtIns.GrantsForOwners([]PrincipalRef{principal}, Request{}), nil
+	}
+	return s.permissions.GrantsForPrincipal(ctx, principal)
+}
+
+// GrantsForOwners retrieves active grants for the specified owners, merging in-memory built-in grants and custom grants from the store.
+func (s *Service) GrantsForOwners(ctx context.Context, owners []PrincipalRef, req Request) ([]Grant, error) {
+	var builtInOwners []PrincipalRef
+	var customOwners []PrincipalRef
+	for _, owner := range owners {
+		if owner.Kind == PrincipalRole && strings.HasPrefix(owner.ID, BuiltInPrefix) {
+			builtInOwners = append(builtInOwners, owner)
+		} else {
+			customOwners = append(customOwners, owner)
+		}
+	}
+
+	var grants []Grant
+	if len(builtInOwners) > 0 {
+		grants = append(grants, s.builtIns.GrantsForOwners(builtInOwners, req)...)
+	}
+
+	if len(customOwners) > 0 {
+		cg, err := s.permissions.GrantsForOwners(ctx, customOwners, req)
+		if err != nil {
+			return nil, err
+		}
+		grants = append(grants, cg...)
+	}
+
+	return grants, nil
+}
+
+// PrincipalsWithGrant retrieves all principal hits containing a grant matching the request criteria.
+func (s *Service) PrincipalsWithGrant(ctx context.Context, req Request) ([]PrincipalHit, error) {
+	return s.permissions.PrincipalsWithGrant(ctx, req)
+}
+
+// ExpandRoles resolves the full transitive closure of inherited roles for the given role IDs, filtering out disabled roles.
+func (s *Service) ExpandRoles(ctx context.Context, roleIDs []string) ([]string, error) {
+	var builtInIDs []string
+	var customIDs []string
+	for _, id := range roleIDs {
+		if strings.HasPrefix(id, BuiltInPrefix) {
+			builtInIDs = append(builtInIDs, id)
+		} else {
+			customIDs = append(customIDs, id)
+		}
+	}
+
+	var expanded []string
+	if len(customIDs) > 0 {
+		dbExpanded, err := s.permissions.ExpandRoles(ctx, customIDs)
+		if err != nil {
+			return nil, err
+		}
+		expanded = append(expanded, dbExpanded...)
+	}
+
+	if len(builtInIDs) > 0 {
+		expanded = append(expanded, builtInIDs...)
+	}
+
+	expanded = s.builtIns.ExpandRoles(expanded)
+
+	disabledMap, err := s.getDisabledBuiltInRoles(ctx)
+	if err != nil {
+		disabledMap = map[string]bool{}
+	}
+
+	seen := map[string]bool{}
+	var filtered []string
+	for _, rID := range expanded {
+		if seen[rID] {
+			continue
+		}
+		seen[rID] = true
+
+		if disabledMap[rID] {
+			continue
+		}
+		roleDef, err := s.RoleDefinition(ctx, rID)
+		if err == nil && roleDef.IsDisabled {
+			continue
+		}
+		filtered = append(filtered, rID)
+	}
+
+	return filtered, nil
+}
+
+// DeleteGrantsForOwner deletes all grants for a given principal owner. Returns an error if the owner is a built-in role.
+func (s *Service) DeleteGrantsForOwner(ctx context.Context, ownerKind PrincipalKind, ownerID string) error {
+	if ownerKind == PrincipalRole && strings.HasPrefix(ownerID, BuiltInPrefix) {
+		return fmt.Errorf("cannot delete grants for built-in role: %s", ownerID)
+	}
+	return s.permissions.DeleteGrantsForOwner(ctx, ownerKind, ownerID)
 }
 
 func grantsEquivalent(left, right Grant) bool {

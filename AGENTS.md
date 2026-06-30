@@ -14,11 +14,14 @@ When generating or modifying code that uses `go-permissions`, ALWAYS follow thes
 - **Correct**: `permissions.Role{ID: "builtin.backup-operator", ...}`
 
 ### 2. Client Interaction via `Service` Proxying Only
-- **Rule**: Never attempt to access or invoke methods on the raw `PermissionStore` directly (do not look for a `.Store()` getter). Always call proxy methods directly on `*permissions.Service`.
+- **Rule**: Preferably call proxy methods directly on `*permissions.Service`. If raw store access is explicitly needed, use the `svc.GetStore()` method, although proxying via `Service` is recommended.
 - **Correct Methods on Service**:
+  - `svc.AddBuiltInRole(ctx, role)` (Idempotently registers system built-ins in-memory)
   - `svc.RoleDefinitions(ctx)` (Combines in-memory built-ins and DB custom roles)
   - `svc.RoleDefinition(ctx, roleID)`
   - `svc.CreateRole(ctx, role)`
+  - `svc.UpdateRole(ctx, role)`
+  - `svc.DeleteRole(ctx, roleID)`
   - `svc.AddRoleInheritance(ctx, parentRoleID, childRoleID)`
   - `svc.DisableBuiltInRole(ctx, roleID)` / `svc.EnableBuiltInRole(ctx, roleID)`
 
@@ -39,7 +42,7 @@ When generating or modifying code that uses `go-permissions`, ALWAYS follow thes
 ```go
 func InitBuiltIns(ctx context.Context, svc *permissions.Service) error {
     // Register built-in feature role in memory
-    err := svc.BootstrapBuiltInRole(ctx, permissions.Role{
+    err := svc.AddBuiltInRole(ctx, permissions.Role{
         ID:          "builtin.backup-operator",
         Name:        "Backup Operator",
         Description: "Allows system backup operations",

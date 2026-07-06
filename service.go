@@ -659,6 +659,32 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 	return result, nil
 }
 
+func (s *Service) AllowedTeamsForUser(ctx context.Context, userID, perm string) (allTeams bool, teamIDs []string, err error) {
+	if perm == "" {
+		return false, nil, fmt.Errorf("permission name is required")
+	}
+
+	perms, err := s.EffectivePermissions(ctx, userID, "")
+	if err != nil {
+		return false, nil, err
+	}
+
+	seen := map[string]bool{}
+	for _, p := range perms {
+		if p.PermissionName == perm {
+			if p.TeamScope == "*" {
+				return true, nil, nil
+			}
+			if !seen[p.TeamScope] {
+				teamIDs = append(teamIDs, p.TeamScope)
+				seen[p.TeamScope] = true
+			}
+		}
+	}
+
+	return false, teamIDs, nil
+}
+
 func (s *Service) PrincipalsWithPermission(ctx context.Context, teamID string, object, perm string) ([]PrincipalHit, error) {
 	if perm == "" {
 		return nil, fmt.Errorf("permission name is required")

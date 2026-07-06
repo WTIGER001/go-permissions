@@ -172,6 +172,26 @@ func (p *TeamPermission) Filter(ctx context.Context, subject any, teamIDs ...str
 	return allowed
 }
 
+func (p *TeamPermission) AllowedTeams(ctx context.Context, subject any) (allTeams bool, teamIDs []string, err error) {
+	if err := p.ensureChecker(); err != nil {
+		return false, nil, err
+	}
+	userID, err := subjectID(subject)
+	if err != nil {
+		return false, nil, err
+	}
+
+	type allowedTeamsChecker interface {
+		AllowedTeamsForUser(ctx context.Context, userID, perm string) (bool, []string, error)
+	}
+
+	if ac, ok := p.checker.(allowedTeamsChecker); ok {
+		return ac.AllowedTeamsForUser(ctx, userID, p.id)
+	}
+
+	return false, nil, fmt.Errorf("underlying checker does not support AllowedTeamsForUser")
+}
+
 type ObjectPermission struct{ permissionMeta }
 
 func NewObjectPermission(id, namespace, name, description string) *ObjectPermission {

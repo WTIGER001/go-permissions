@@ -96,7 +96,7 @@ func TestStoreQueries_EndToEnd(t *testing.T) {
 		t.Fatalf("expected 2 expanded roles, got %d (%v)", len(expandedRoleIDs), expandedRoleIDs)
 	}
 
-	teamID := int64(42)
+	teamID := "42"
 	owners := []permissions.PrincipalRef{
 		{Kind: permissions.PrincipalUser, ID: "u-1"},
 		{Kind: permissions.PrincipalGroup, ID: "g-parent"},
@@ -105,7 +105,7 @@ func TestStoreQueries_EndToEnd(t *testing.T) {
 
 	grants, err := store.ListGrantsForOwners(ctx, owners, permissions.Request{
 		UserID: "u-1",
-		TeamID: &teamID,
+		TeamID: teamID,
 		Object: "billing",
 		Perm:   "billing.read",
 	})
@@ -135,8 +135,8 @@ func TestListPrincipalsWithGrant_DenyOverridesAllow(t *testing.T) {
 		}
 	}
 
-	teamID := int64(42)
-	hits, err := store.ListPrincipalsWithGrant(ctx, permissions.Request{TeamID: &teamID, Object: "billing", Perm: "billing.read"})
+	teamID := "42"
+	hits, err := store.ListPrincipalsWithGrant(ctx, permissions.Request{TeamID: teamID, Object: "billing", Perm: "billing.read"})
 	if err != nil {
 		t.Fatalf("ListPrincipalsWithGrant: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestPostgresGrantsForOwners_DynamicScopes(t *testing.T) {
 		}
 	}
 
-	teamID := int64(42)
+	teamID := "42"
 	owners := []permissions.PrincipalRef{
 		{Kind: permissions.PrincipalUser, ID: "u-1"},
 	}
@@ -210,7 +210,7 @@ func TestPostgresGrantsForOwners_DynamicScopes(t *testing.T) {
 	// 1. Verify we fetch the grant with dynamic team_scope '?team'
 	grants, err := store.ListGrantsForOwners(ctx, owners, permissions.Request{
 		UserID: "u-1",
-		TeamID: &teamID,
+		TeamID: teamID,
 		Perm:   "billing.read",
 	})
 	if err != nil {

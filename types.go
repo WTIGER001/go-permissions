@@ -28,7 +28,7 @@ const (
 
 type Request struct {
 	UserID string
-	TeamID *int64
+	TeamID string
 	Object string
 	Perm   string
 }

@@ -287,8 +287,8 @@ func (s *Service) HasSystemPermission(ctx context.Context, userID string, perm s
 	return s.HasPermission(ctx, Request{UserID: userID, Perm: perm})
 }
 
-func (s *Service) HasTeamPermission(ctx context.Context, userID string, teamID int64, object, perm string) (bool, error) {
-	return s.HasPermission(ctx, Request{UserID: userID, TeamID: &teamID, Object: object, Perm: perm})
+func (s *Service) HasTeamPermission(ctx context.Context, userID string, teamID string, object, perm string) (bool, error) {
+	return s.HasPermission(ctx, Request{UserID: userID, TeamID: teamID, Object: object, Perm: perm})
 }
 
 func (s *Service) HasFieldPermission(ctx context.Context, req Request, fieldPath string) (bool, error) {
@@ -329,9 +329,6 @@ func (s *Service) HasPermission(ctx context.Context, req Request) (bool, error) 
 }
 
 func (s *Service) evaluatePermission(ctx context.Context, req Request, fieldPath *string) (bool, error) {
-	if req.TeamID != nil && *req.TeamID <= 0 {
-		return false, fmt.Errorf("team ID must be positive when provided")
-	}
 	if req.Perm == "" {
 		return false, fmt.Errorf("permission name is required")
 	}
@@ -550,12 +547,9 @@ func (s *Service) expandRolesCached(ctx context.Context, rootRoleID string, cach
 	return filtered, nil
 }
 
-func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamID *int64) ([]EffectivePermission, error) {
+func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamID string) ([]EffectivePermission, error) {
 	if userID == "" {
 		return nil, fmt.Errorf("user ID is required")
-	}
-	if teamID != nil && *teamID <= 0 {
-		return nil, fmt.Errorf("team ID must be positive when provided")
 	}
 
 	now := time.Now().UTC()
@@ -665,10 +659,7 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 	return result, nil
 }
 
-func (s *Service) PrincipalsWithPermission(ctx context.Context, teamID *int64, object, perm string) ([]PrincipalHit, error) {
-	if teamID != nil && *teamID <= 0 {
-		return nil, fmt.Errorf("team ID must be positive when provided")
-	}
+func (s *Service) PrincipalsWithPermission(ctx context.Context, teamID string, object, perm string) ([]PrincipalHit, error) {
 	if perm == "" {
 		return nil, fmt.Errorf("permission name is required")
 	}
@@ -787,13 +778,12 @@ func isIndexedFieldPath(path string) bool {
 	return false
 }
 
-func matchesTeamScope(grant Grant, teamID *int64) bool {
-	if teamID == nil {
+func matchesTeamScope(grant Grant, teamID string) bool {
+	if teamID == "" {
 		return grant.TeamScope == "*"
 	}
 
-	team := strconv.FormatInt(*teamID, 10)
-	return grant.TeamScope == "*" || grant.TeamScope == team
+	return grant.TeamScope == "*" || grant.TeamScope == teamID
 }
 
 func permissionKey(grant Grant) string {

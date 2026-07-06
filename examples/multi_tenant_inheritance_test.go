@@ -3,8 +3,7 @@ package examples
 import (
 	"context"
 	"sort"
-	"strconv"
-	"testing"
+		"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -20,11 +19,11 @@ func TestMultiTenantInheritance(t *testing.T) {
 	viewPerm := permissions.NewTeamPermission("reports.view", "Reports", "View Team Reports", "Allows viewing reports for a team.").WithChecker(svc)
 	exportPerm := permissions.NewTeamPermission("reports.export", "Reports", "Export Team Reports", "Allows exporting reports for a team.").WithChecker(svc)
 
-	team1001 := int64(1001)
-	team2002 := int64(2002)
+	team1001 := "1001"
+	team2002 := "2002"
 	store.AddGrants(
-		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.team_analyst_1001", Effect: permissions.EffectAllow, TeamScope: strconv.FormatInt(team1001, 10), PermissionName: viewPerm.ID()},
-		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.team_analyst_2002", Effect: permissions.EffectAllow, TeamScope: strconv.FormatInt(team2002, 10), PermissionName: viewPerm.ID()},
+		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.team_analyst_1001", Effect: permissions.EffectAllow, TeamScope: team1001, PermissionName: viewPerm.ID()},
+		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.team_analyst_2002", Effect: permissions.EffectAllow, TeamScope: team2002, PermissionName: viewPerm.ID()},
 	)
 
 	if err := svc.AssignRoleToUser(ctx, "anna", "role.team_analyst_1001", nil); err != nil {
@@ -33,7 +32,7 @@ func TestMultiTenantInheritance(t *testing.T) {
 	if err := svc.AssignRoleToUser(ctx, "ben", "role.team_analyst_2002", nil); err != nil {
 		t.Fatalf("assign ben role: %v", err)
 	}
-	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "chris", Effect: permissions.EffectAllow, TeamScope: strconv.FormatInt(team1001, 10), PermissionName: exportPerm.ID()})
+	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "chris", Effect: permissions.EffectAllow, TeamScope: team1001, PermissionName: exportPerm.ID()})
 
 	anna1001, err := svc.HasTeamPermission(ctx, "anna", team1001, "", viewPerm.ID())
 	if err != nil {
@@ -70,7 +69,7 @@ func TestMultiTenantInheritance(t *testing.T) {
 		t.Fatalf("chris team2002 export got %v want false", got)
 	}
 
-	hits1001, err := svc.PrincipalsWithPermission(ctx, &team1001, "", viewPerm.ID())
+	hits1001, err := svc.PrincipalsWithPermission(ctx, team1001, "", viewPerm.ID())
 	if err != nil {
 		t.Fatalf("hits1001: %v", err)
 	}
@@ -83,7 +82,7 @@ func TestMultiTenantInheritance(t *testing.T) {
 		t.Fatalf("unexpected owners team1001: %v", labels1001)
 	}
 
-	hits2002, err := svc.PrincipalsWithPermission(ctx, &team2002, "", viewPerm.ID())
+	hits2002, err := svc.PrincipalsWithPermission(ctx, team2002, "", viewPerm.ID())
 	if err != nil {
 		t.Fatalf("hits2002: %v", err)
 	}

@@ -36,11 +36,11 @@ func TestJSONStore_SaveLoadAndHasPermission(t *testing.T) {
 		t.Fatalf("reload store: %v", err)
 	}
 
-	teamID := int64(42)
+	teamID := "42"
 	svc := permissions.NewService(reloaded, reloaded)
 	allowed, err := svc.HasPermission(context.Background(), permissions.Request{
 		UserID: "u-1",
-		TeamID: &teamID,
+		TeamID: teamID,
 		Object: "billing",
 		Perm:   "billing.read",
 	})
@@ -72,8 +72,8 @@ func TestJSONStore_ListPrincipalsWithGrant_DenyOverridesAllow(t *testing.T) {
 		t.Fatalf("set data: %v", err)
 	}
 
-	teamID := int64(42)
-	hits, err := store.ListPrincipalsWithGrant(context.Background(), permissions.Request{TeamID: &teamID, Object: "billing", Perm: "billing.read"})
+	teamID := "42"
+	hits, err := store.ListPrincipalsWithGrant(context.Background(), permissions.Request{TeamID: teamID, Object: "billing", Perm: "billing.read"})
 	if err != nil {
 		t.Fatalf("ListPrincipalsWithGrant: %v", err)
 	}

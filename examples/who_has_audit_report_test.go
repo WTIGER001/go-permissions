@@ -3,8 +3,7 @@ package examples
 import (
 	"context"
 	"sort"
-	"strconv"
-	"testing"
+		"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -17,8 +16,8 @@ func TestWhoHasAuditReport(t *testing.T) {
 	identity := inmemory.NewIdentityProvider()
 	svc := permissions.NewService(store, identity)
 
-	teamID := int64(3003)
-	teamScope := strconv.FormatInt(teamID, 10)
+	teamID := "3003"
+	teamScope := teamID
 	invoice123 := "invoice-123"
 	invoiceLocked := "invoice-locked"
 	store.AddGrants(
@@ -29,7 +28,7 @@ func TestWhoHasAuditReport(t *testing.T) {
 		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.approver", Effect: permissions.EffectDeny, TeamScope: teamScope, ObjectScope: &invoiceLocked, PermissionName: "billing.invoice.approve"},
 	)
 
-	hitsRead, err := svc.PrincipalsWithPermission(ctx, &teamID, "", "billing.invoice.read")
+	hitsRead, err := svc.PrincipalsWithPermission(ctx, teamID, "", "billing.invoice.read")
 	if err != nil {
 		t.Fatalf("read hits: %v", err)
 	}
@@ -42,7 +41,7 @@ func TestWhoHasAuditReport(t *testing.T) {
 		t.Fatalf("unexpected read owners: %v", labelsRead)
 	}
 
-	hitsApprove, err := svc.PrincipalsWithPermission(ctx, &teamID, "invoice-123", "billing.invoice.approve")
+	hitsApprove, err := svc.PrincipalsWithPermission(ctx, teamID, "invoice-123", "billing.invoice.approve")
 	if err != nil {
 		t.Fatalf("approve hits invoice-123: %v", err)
 	}
@@ -55,7 +54,7 @@ func TestWhoHasAuditReport(t *testing.T) {
 		t.Fatalf("unexpected approve owners invoice-123: %v", labelsApprove)
 	}
 
-	hitsLocked, err := svc.PrincipalsWithPermission(ctx, &teamID, "invoice-locked", "billing.invoice.approve")
+	hitsLocked, err := svc.PrincipalsWithPermission(ctx, teamID, "invoice-locked", "billing.invoice.approve")
 	if err != nil {
 		t.Fatalf("approve hits invoice-locked: %v", err)
 	}

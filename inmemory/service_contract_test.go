@@ -39,8 +39,8 @@ func (s *harnessStore) SeedDenyOverridesAllow(_ context.Context, _ *testing.T) p
 		permissions.Grant{OwnerKind: permissions.PrincipalGroup, OwnerID: "g-1", Effect: permissions.EffectDeny, TeamScope: "42", ObjectScope: strPtr("*"), PermissionName: "billing.read"},
 	)
 
-	teamID := int64(42)
-	return permissions.Request{UserID: "u-1", TeamID: &teamID, Object: "billing", Perm: "billing.read"}
+	teamID := "42"
+	return permissions.Request{UserID: "u-1", TeamID: teamID, Object: "billing", Perm: "billing.read"}
 }
 
 func (s *harnessStore) SeedStrictBindingError(_ context.Context, _ *testing.T) permissions.Request {
@@ -55,8 +55,8 @@ func (s *harnessStore) SeedStrictBindingError(_ context.Context, _ *testing.T) p
 		VariableSpec:   map[string]any{"team": "required"},
 	})
 
-	teamID := int64(42)
-	return permissions.Request{UserID: "u-1", TeamID: &teamID, Object: "billing", Perm: "billing.read"}
+	teamID := "42"
+	return permissions.Request{UserID: "u-1", TeamID: teamID, Object: "billing", Perm: "billing.read"}
 }
 
 func (s *harnessStore) SeedEffectivePermissions(_ context.Context, _ *testing.T) testingharness.EffectiveExpectation {
@@ -66,10 +66,10 @@ func (s *harnessStore) SeedEffectivePermissions(_ context.Context, _ *testing.T)
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "u-1", Effect: permissions.EffectAllow, TeamScope: "7", PermissionName: "report.write"},
 	)
 
-	teamID := int64(7)
+	teamID := "7"
 	return testingharness.EffectiveExpectation{
 		UserID:          "u-1",
-		TeamID:          &teamID,
+		TeamID:          teamID,
 		ExpectedPerms:   []string{"report.write"},
 		UnexpectedPerms: []string{"report.read"},
 	}
@@ -93,7 +93,7 @@ func (s *harnessStore) SeedTransitiveRoles(ctx context.Context, t *testing.T) pe
 		TeamScope:      "*",
 		PermissionName: "reports.view",
 	})
-	return permissions.Request{UserID: "u-1", TeamID: nil, Object: "reports", Perm: "reports.view"}
+	return permissions.Request{UserID: "u-1", TeamID: "", Object: "reports", Perm: "reports.view"}
 }
 
 func strPtr(v string) *string {

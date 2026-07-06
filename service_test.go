@@ -209,7 +209,7 @@ func (m *mockStore) DisabledBuiltInRoles(_ context.Context) ([]string, error) { 
 
 
 func TestHasPermission_DenyOverridesAllow(t *testing.T) {
-	teamID := int64(42)
+	teamID := "42"
 	store := &mockStore{
 		groupIDs: []string{"g-1"},
 		grants: []Grant{
@@ -233,7 +233,7 @@ func TestHasPermission_DenyOverridesAllow(t *testing.T) {
 	svc := NewServiceWithProviders(store, store)
 	allowed, err := svc.HasPermission(context.Background(), Request{
 		UserID: "u-1",
-		TeamID: &teamID,
+		TeamID: teamID,
 		Perm:   "billing.read",
 	})
 	if err != nil {
@@ -245,7 +245,7 @@ func TestHasPermission_DenyOverridesAllow(t *testing.T) {
 }
 
 func TestHasPermission_StrictMissingBindingReturnsError(t *testing.T) {
-	teamID := int64(42)
+	teamID := "42"
 	store := &mockStore{
 		roleAssignments: []RoleAssignment{{RoleID: "r-1"}},
 		expandedRoleIDs: []string{"r-1"},
@@ -266,7 +266,7 @@ func TestHasPermission_StrictMissingBindingReturnsError(t *testing.T) {
 	svc := NewServiceWithProviders(store, store)
 	_, err := svc.HasPermission(context.Background(), Request{
 		UserID: "u-1",
-		TeamID: &teamID,
+		TeamID: teamID,
 		Perm:   "billing.read",
 	})
 	if err == nil {
@@ -275,7 +275,7 @@ func TestHasPermission_StrictMissingBindingReturnsError(t *testing.T) {
 }
 
 func TestEffectivePermissions_DenyRemovesAllow(t *testing.T) {
-	teamID := int64(7)
+	teamID := "7"
 	store := &mockStore{
 		roleAssignments: []RoleAssignment{
 			{RoleID: "r-9"},
@@ -306,7 +306,7 @@ func TestEffectivePermissions_DenyRemovesAllow(t *testing.T) {
 	}
 
 	svc := NewServiceWithProviders(store, store)
-	effective, err := svc.EffectivePermissions(context.Background(), "u-1", &teamID)
+	effective, err := svc.EffectivePermissions(context.Background(), "u-1", teamID)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -326,7 +326,7 @@ func TestEffectivePermissions_DenyRemovesAllow(t *testing.T) {
 }
 
 func TestPrincipalsWithPermission_DenyOverridesAllow(t *testing.T) {
-	teamID := int64(42)
+	teamID := "42"
 	store := &mockStore{
 		principalHits: []PrincipalHit{
 			{Kind: PrincipalRole, ID: "r-2", TeamScope: "*", PermissionName: "billing.read"},
@@ -336,7 +336,7 @@ func TestPrincipalsWithPermission_DenyOverridesAllow(t *testing.T) {
 	}
 
 	svc := NewServiceWithProviders(store, store)
-	hits, err := svc.PrincipalsWithPermission(context.Background(), &teamID, "billing", "billing.read")
+	hits, err := svc.PrincipalsWithPermission(context.Background(), teamID, "billing", "billing.read")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -361,12 +361,7 @@ func TestPrincipalsWithPermission_Validation(t *testing.T) {
 	store := &mockStore{}
 	svc := NewServiceWithProviders(store, store)
 
-	teamID := int64(0)
-	if _, err := svc.PrincipalsWithPermission(context.Background(), &teamID, "", "billing.read"); err == nil {
-		t.Fatalf("expected invalid team ID error")
-	}
-
-	if _, err := svc.PrincipalsWithPermission(context.Background(), nil, "", ""); err == nil {
+	if _, err := svc.PrincipalsWithPermission(context.Background(), "", "", ""); err == nil {
 		t.Fatalf("expected empty permission error")
 	}
 }
@@ -448,7 +443,7 @@ func TestAllowUserFor_RejectsNonPositiveTTL(t *testing.T) {
 }
 
 func TestHasPermission_IgnoresExpiredGrant(t *testing.T) {
-	teamID := int64(42)
+	teamID := "42"
 	expiredAt := time.Now().UTC().Add(-1 * time.Minute)
 	store := &mockStore{
 		grants: []Grant{
@@ -464,7 +459,7 @@ func TestHasPermission_IgnoresExpiredGrant(t *testing.T) {
 	}
 
 	svc := NewServiceWithProviders(store, store)
-	allowed, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", TeamID: &teamID, Perm: "billing.read"})
+	allowed, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", TeamID: teamID, Perm: "billing.read"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -487,7 +482,7 @@ func TestHasPermission_EmptyUserIDSkipsIdentityLookups(t *testing.T) {
 }
 
 func TestHasFieldPermission_AllowAllWhenRestrictedFieldsEmpty(t *testing.T) {
-	teamID := int64(42)
+	teamID := "42"
 	store := &mockStore{
 		grants: []Grant{{
 			OwnerKind:      PrincipalUser,
@@ -499,7 +494,7 @@ func TestHasFieldPermission_AllowAllWhenRestrictedFieldsEmpty(t *testing.T) {
 	}
 
 	svc := NewServiceWithProviders(store, store)
-	allowed, err := svc.HasFieldPermission(context.Background(), Request{UserID: "u-1", TeamID: &teamID, Perm: "billing.read"}, "profile.email")
+	allowed, err := svc.HasFieldPermission(context.Background(), Request{UserID: "u-1", TeamID: teamID, Perm: "billing.read"}, "profile.email")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -509,7 +504,7 @@ func TestHasFieldPermission_AllowAllWhenRestrictedFieldsEmpty(t *testing.T) {
 }
 
 func TestHasFieldPermission_RestrictedAllowAndScopedDeny(t *testing.T) {
-	teamID := int64(42)
+	teamID := "42"
 	store := &mockStore{
 		grants: []Grant{
 			{
@@ -532,7 +527,7 @@ func TestHasFieldPermission_RestrictedAllowAndScopedDeny(t *testing.T) {
 
 	svc := NewServiceWithProviders(store, store)
 
-	wholeAllowed, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", TeamID: &teamID, Perm: "billing.read"})
+	wholeAllowed, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", TeamID: teamID, Perm: "billing.read"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -540,7 +535,7 @@ func TestHasFieldPermission_RestrictedAllowAndScopedDeny(t *testing.T) {
 		t.Fatalf("expected whole-object permission to remain allowed")
 	}
 
-	emailAllowed, err := svc.HasFieldPermission(context.Background(), Request{UserID: "u-1", TeamID: &teamID, Perm: "billing.read"}, "profile.email")
+	emailAllowed, err := svc.HasFieldPermission(context.Background(), Request{UserID: "u-1", TeamID: teamID, Perm: "billing.read"}, "profile.email")
 	if err != nil {
 		t.Fatalf("expected no error for email, got %v", err)
 	}
@@ -548,7 +543,7 @@ func TestHasFieldPermission_RestrictedAllowAndScopedDeny(t *testing.T) {
 		t.Fatalf("expected profile.email to be allowed")
 	}
 
-	secretAllowed, err := svc.HasFieldPermission(context.Background(), Request{UserID: "u-1", TeamID: &teamID, Perm: "billing.read"}, "profile.secret")
+	secretAllowed, err := svc.HasFieldPermission(context.Background(), Request{UserID: "u-1", TeamID: teamID, Perm: "billing.read"}, "profile.secret")
 	if err != nil {
 		t.Fatalf("expected no error for secret, got %v", err)
 	}
@@ -558,18 +553,18 @@ func TestHasFieldPermission_RestrictedAllowAndScopedDeny(t *testing.T) {
 }
 
 func TestHasFieldPermission_RejectsIndexedPath(t *testing.T) {
-	teamID := int64(42)
+	teamID := "42"
 	store := &mockStore{}
 	svc := NewServiceWithProviders(store, store)
 
-	_, err := svc.HasFieldPermission(context.Background(), Request{UserID: "u-1", TeamID: &teamID, Perm: "billing.read"}, "items.0.name")
+	_, err := svc.HasFieldPermission(context.Background(), Request{UserID: "u-1", TeamID: teamID, Perm: "billing.read"}, "items.0.name")
 	if err == nil {
 		t.Fatalf("expected indexed path validation error")
 	}
 }
 
 func TestFilterPermittedFields_ReturnsAllowedSubset(t *testing.T) {
-	teamID := int64(42)
+	teamID := "42"
 	store := &mockStore{
 		grants: []Grant{
 			{
@@ -592,7 +587,7 @@ func TestFilterPermittedFields_ReturnsAllowedSubset(t *testing.T) {
 	}
 
 	svc := NewServiceWithProviders(store, store)
-	paths, err := svc.FilterPermittedFields(context.Background(), Request{UserID: "u-1", TeamID: &teamID, Perm: "billing.write"}, []string{"profile.email", "profile.secret", "settings.theme", "settings.other"})
+	paths, err := svc.FilterPermittedFields(context.Background(), Request{UserID: "u-1", TeamID: teamID, Perm: "billing.write"}, []string{"profile.email", "profile.secret", "settings.theme", "settings.other"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -983,8 +978,8 @@ func TestSaveBuiltIns_UsesBulkEnsurePath(t *testing.T) {
 
 
 func TestHasPermission_MultiTenantRole_BothTeamsAllowed(t *testing.T) {
-	team42 := int64(42)
-	team99 := int64(99)
+	team42 := "42"
+	team99 := "99"
 
 	store := &mockStore{
 		roleAssignments: []RoleAssignment{
@@ -1007,7 +1002,7 @@ func TestHasPermission_MultiTenantRole_BothTeamsAllowed(t *testing.T) {
 
 	allowed, err := svc.HasPermission(context.Background(), Request{
 		UserID: "u-1",
-		TeamID: &team42,
+		TeamID: team42,
 		Perm:   "billing.read",
 	})
 	if err != nil {
@@ -1019,7 +1014,7 @@ func TestHasPermission_MultiTenantRole_BothTeamsAllowed(t *testing.T) {
 
 	allowed, err = svc.HasPermission(context.Background(), Request{
 		UserID: "u-1",
-		TeamID: &team99,
+		TeamID: team99,
 		Perm:   "billing.read",
 	})
 	if err != nil {
@@ -1031,8 +1026,8 @@ func TestHasPermission_MultiTenantRole_BothTeamsAllowed(t *testing.T) {
 }
 
 func TestHasPermission_MultiTenantRole_DenyInOneTeam(t *testing.T) {
-	team42 := int64(42)
-	team99 := int64(99)
+	team42 := "42"
+	team99 := "99"
 
 	store := &mockStore{
 		roleAssignments: []RoleAssignment{
@@ -1062,7 +1057,7 @@ func TestHasPermission_MultiTenantRole_DenyInOneTeam(t *testing.T) {
 
 	allowed, err := svc.HasPermission(context.Background(), Request{
 		UserID: "u-1",
-		TeamID: &team42,
+		TeamID: team42,
 		Perm:   "billing.read",
 	})
 	if err != nil {
@@ -1074,7 +1069,7 @@ func TestHasPermission_MultiTenantRole_DenyInOneTeam(t *testing.T) {
 
 	allowed, err = svc.HasPermission(context.Background(), Request{
 		UserID: "u-1",
-		TeamID: &team99,
+		TeamID: team99,
 		Perm:   "billing.read",
 	})
 	if err != nil {
@@ -1086,7 +1081,7 @@ func TestHasPermission_MultiTenantRole_DenyInOneTeam(t *testing.T) {
 }
 
 func TestEffectivePermissions_MultiTenantRole(t *testing.T) {
-	team42 := int64(42)
+	team42 := "42"
 
 	store := &mockStore{
 		roleAssignments: []RoleAssignment{
@@ -1107,7 +1102,7 @@ func TestEffectivePermissions_MultiTenantRole(t *testing.T) {
 
 	svc := NewServiceWithProviders(store, store)
 
-	eff, err := svc.EffectivePermissions(context.Background(), "u-1", &team42)
+	eff, err := svc.EffectivePermissions(context.Background(), "u-1", team42)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

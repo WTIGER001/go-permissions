@@ -159,22 +159,22 @@ select exists (
 
 func (s *postgresHarnessStore) SeedDenyOverridesAllow(ctx context.Context, t *testing.T) permissions.Request {
 	seedDenyOverridesAllowScenario(t, ctx, s.pool)
-	teamID := int64(42)
-	return permissions.Request{UserID: "u-1", TeamID: &teamID, Object: "billing", Perm: "billing.read"}
+	teamID := "42"
+	return permissions.Request{UserID: "u-1", TeamID: teamID, Object: "billing", Perm: "billing.read"}
 }
 
 func (s *postgresHarnessStore) SeedStrictBindingError(ctx context.Context, t *testing.T) permissions.Request {
 	seedStrictBindingScenario(t, ctx, s.pool)
-	teamID := int64(42)
-	return permissions.Request{UserID: "u-1", TeamID: &teamID, Object: "billing", Perm: "billing.read"}
+	teamID := "42"
+	return permissions.Request{UserID: "u-1", TeamID: teamID, Object: "billing", Perm: "billing.read"}
 }
 
 func (s *postgresHarnessStore) SeedEffectivePermissions(ctx context.Context, t *testing.T) testingharness.EffectiveExpectation {
 	seedEffectivePermissionsScenario(t, ctx, s.pool)
-	teamID := int64(7)
+	teamID := "7"
 	return testingharness.EffectiveExpectation{
 		UserID:          "u-1",
-		TeamID:          &teamID,
+		TeamID:          teamID,
 		ExpectedPerms:   []string{"report.write"},
 		UnexpectedPerms: []string{"report.read"},
 	}
@@ -205,7 +205,7 @@ func (s *postgresHarnessStore) SeedTransitiveRoles(ctx context.Context, t *testi
 		t.Fatalf("AddRoleInheritance r-mid->r-leaf: %v", err)
 	}
 
-	return permissions.Request{UserID: "u-1", TeamID: nil, Object: "reports", Perm: "reports.view"}
+	return permissions.Request{UserID: "u-1", TeamID: "", Object: "reports", Perm: "reports.view"}
 }
 
 func seedDenyOverridesAllowScenario(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {

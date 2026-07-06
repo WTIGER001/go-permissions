@@ -26,21 +26,21 @@ func TestTenantOnboardingKit(t *testing.T) {
 	if err := svc.AssignRoleToUser(ctx, "tenant-admin", "role.tenant_starter", nil); err != nil {
 		t.Fatalf("assign tenant starter role: %v", err)
 	}
-	view555, err := svc.HasTeamPermission(ctx, "tenant-admin", 555, "", viewPerm.ID())
+	view555, err := svc.HasTeamPermission(ctx, "tenant-admin", "555", "", viewPerm.ID())
 	if err != nil {
 		t.Fatalf("view team 555 error: %v", err)
 	}
 	if view555 != true {
 		t.Fatalf("view team 555 got %v want true", view555)
 	}
-	create555, err := svc.HasTeamPermission(ctx, "tenant-admin", 555, "", createPerm.ID())
+	create555, err := svc.HasTeamPermission(ctx, "tenant-admin", "555", "", createPerm.ID())
 	if err != nil {
 		t.Fatalf("create team 555 error: %v", err)
 	}
 	if create555 != true {
 		t.Fatalf("create team 555 got %v want true", create555)
 	}
-	view777, err := svc.HasTeamPermission(ctx, "tenant-admin", 777, "", viewPerm.ID())
+	view777, err := svc.HasTeamPermission(ctx, "tenant-admin", "777", "", viewPerm.ID())
 	if err != nil {
 		t.Fatalf("view team 777 error: %v", err)
 	}

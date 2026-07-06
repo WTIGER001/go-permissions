@@ -3,8 +3,7 @@ package examples
 import (
 	"context"
 	"reflect"
-	"strconv"
-	"testing"
+		"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -25,8 +24,8 @@ func TestFieldScopedSensitiveObject(t *testing.T) {
 	identity := inmemory.NewIdentityProvider()
 	svc := permissions.NewService(store, identity)
 
-	teamID := int64(501)
-	teamScope := strconv.FormatInt(teamID, 10)
+	teamID := "501"
+	teamScope := teamID
 	objectID := "customer-1"
 
 	readPerm := permissions.NewObjectPermission("customer.read", "Customer", "Read Customer", "Allows reading customer profile fields.").WithChecker(svc)
@@ -75,7 +74,7 @@ func TestFieldScopedSensitiveObject(t *testing.T) {
 
 	fullReadable, err := svc.FilterPermittedFields(ctx, permissions.Request{
 		UserID: "user-full",
-		TeamID: &teamID,
+		TeamID: teamID,
 		Object: objectID,
 		Perm:   readPerm.ID(),
 	}, allFields)
@@ -88,7 +87,7 @@ func TestFieldScopedSensitiveObject(t *testing.T) {
 
 	basicReadable, err := svc.FilterPermittedFields(ctx, permissions.Request{
 		UserID: "user-basic",
-		TeamID: &teamID,
+		TeamID: teamID,
 		Object: objectID,
 		Perm:   readPerm.ID(),
 	}, allFields)
@@ -105,7 +104,7 @@ func TestFieldScopedSensitiveObject(t *testing.T) {
 
 	basicWritable, err := svc.FilterPermittedFields(ctx, permissions.Request{
 		UserID: "user-basic",
-		TeamID: &teamID,
+		TeamID: teamID,
 		Object: objectID,
 		Perm:   writePerm.ID(),
 	}, []string{"status", "sensitive"})
@@ -131,7 +130,7 @@ func TestFieldScopedSensitiveObject(t *testing.T) {
 
 	fullCanWriteSensitive, err := svc.HasFieldPermission(ctx, permissions.Request{
 		UserID: "user-full",
-		TeamID: &teamID,
+		TeamID: teamID,
 		Object: objectID,
 		Perm:   writePerm.ID(),
 	}, "sensitive")

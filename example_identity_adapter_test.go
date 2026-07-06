@@ -72,8 +72,8 @@ func (examplePolicyStore) GrantsForOwners(_ context.Context, owners []PrincipalR
 	}
 
 	teamscope := "*"
-	if req.TeamID != nil {
-		teamscope = fmt.Sprintf("%d", *req.TeamID)
+	if req.TeamID != "" {
+		teamscope = req.TeamID
 	}
 
 	for _, owner := range owners {
@@ -118,11 +118,11 @@ func ExampleNewServiceWithIdentity_customIdentityAdapter() {
 	policy := examplePolicyStore{}
 
 	svc := NewServiceWithIdentity(identity, policy)
-	teamID := int64(42)
+	teamID := "42"
 
 	ok, err := svc.HasPermission(context.Background(), Request{
 		UserID: "u-123",
-		TeamID: &teamID,
+		TeamID: teamID,
 		Perm:   "billing.read",
 	})
 	if err != nil {

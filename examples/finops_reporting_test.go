@@ -3,8 +3,7 @@ package examples
 import (
 	"context"
 	"sort"
-	"strconv"
-	"testing"
+		"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -23,11 +22,11 @@ func TestFinopsReporting(t *testing.T) {
 	if err := svc.AllowUser(ctx, "alice", systemPerm.ID(), nil); err != nil {
 		t.Fatalf("allow alice system: %v", err)
 	}
-	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "bob", Effect: permissions.EffectAllow, TeamScope: strconv.FormatInt(101, 10), PermissionName: teamPerm.ID()})
+	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "bob", Effect: permissions.EffectAllow, TeamScope: "101", PermissionName: teamPerm.ID()})
 	if err := svc.AssignRoleToUser(ctx, "carol", "role.finops_team_reporter", nil); err != nil {
 		t.Fatalf("assign role carol: %v", err)
 	}
-	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.finops_team_reporter", Effect: permissions.EffectAllow, TeamScope: strconv.FormatInt(202, 10), PermissionName: teamPerm.ID()})
+	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.finops_team_reporter", Effect: permissions.EffectAllow, TeamScope: "202", PermissionName: teamPerm.ID()})
 
 	if got := systemPerm.Can(ctx, "alice"); got != true {
 		t.Fatalf("alice system got %v want true", got)
@@ -35,23 +34,23 @@ func TestFinopsReporting(t *testing.T) {
 	if got := systemPerm.Can(ctx, "bob"); got != false {
 		t.Fatalf("bob system got %v want false", got)
 	}
-	if got := teamPerm.Can(ctx, "bob", 101); got != true {
+	if got := teamPerm.Can(ctx, "bob", "101"); got != true {
 		t.Fatalf("bob team 101 got %v want true", got)
 	}
-	if got := teamPerm.Can(ctx, "bob", 202); got != false {
+	if got := teamPerm.Can(ctx, "bob", "202"); got != false {
 		t.Fatalf("bob team 202 got %v want false", got)
 	}
-	if got := teamPerm.Can(ctx, "carol", 202); got != true {
+	if got := teamPerm.Can(ctx, "carol", "202"); got != true {
 		t.Fatalf("carol team 202 got %v want true", got)
 	}
-	if got := teamPerm.Can(ctx, "carol", 303); got != false {
+	if got := teamPerm.Can(ctx, "carol", "303"); got != false {
 		t.Fatalf("carol team 303 got %v want false", got)
 	}
-	if got := teamPerm.Can(ctx, "dave", 101); got != false {
+	if got := teamPerm.Can(ctx, "dave", "101"); got != false {
 		t.Fatalf("dave team 101 got %v want false", got)
 	}
 
-	systemHits, err := svc.PrincipalsWithPermission(ctx, nil, "", systemPerm.ID())
+	systemHits, err := svc.PrincipalsWithPermission(ctx, "", "", systemPerm.ID())
 	if err != nil {
 		t.Fatalf("system hits: %v", err)
 	}
@@ -64,8 +63,8 @@ func TestFinopsReporting(t *testing.T) {
 		t.Fatalf("unexpected system owners: %v", systemLabels)
 	}
 
-	teamID := int64(202)
-	teamHits, err := svc.PrincipalsWithPermission(ctx, &teamID, "", teamPerm.ID())
+	teamID := "202"
+	teamHits, err := svc.PrincipalsWithPermission(ctx, teamID, "", teamPerm.ID())
 	if err != nil {
 		t.Fatalf("team hits: %v", err)
 	}

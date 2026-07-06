@@ -243,8 +243,8 @@ func (s *Store) ListGrantsForOwners(ctx context.Context, owners []permissions.Pr
 	}
 
 	var teamScope *string
-	if req.TeamID != nil {
-		value := fmt.Sprintf("%d", *req.TeamID)
+	if req.TeamID != "" {
+		value := req.TeamID
 		teamScope = &value
 	}
 
@@ -343,8 +343,8 @@ func (s *Store) ListPrincipalsWithGrant(ctx context.Context, req permissions.Req
 	}
 
 	var teamScope *string
-	if req.TeamID != nil {
-		value := fmt.Sprintf("%d", *req.TeamID)
+	if req.TeamID != "" {
+		value := req.TeamID
 		teamScope = &value
 	}
 

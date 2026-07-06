@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"sync"
+		"sync"
 	"time"
 
 	"github.com/wtiger001/go-permissions"
@@ -329,12 +328,8 @@ func (s *Store) ListGrantsForOwners(_ context.Context, owners []permissions.Prin
 	for _, owner := range owners {
 		ownerSet[string(owner.Kind)+":"+owner.ID] = true
 	}
-
-	hasTeam := req.TeamID != nil
-	team := ""
-	if hasTeam {
-		team = strconv.FormatInt(*req.TeamID, 10)
-	}
+	team := req.TeamID
+	hasTeam := req.TeamID != ""
 
 	result := make([]permissions.Grant, 0, len(s.data.Grants))
 	for _, grant := range s.data.Grants {
@@ -380,11 +375,8 @@ func (s *Store) ListPrincipalsWithGrant(_ context.Context, req permissions.Reque
 
 	now := time.Now().UTC()
 
-	hasTeam := req.TeamID != nil
-	team := ""
-	if hasTeam {
-		team = strconv.FormatInt(*req.TeamID, 10)
-	}
+	team := req.TeamID
+	hasTeam := req.TeamID != ""
 
 	allowByPrincipal := map[string]permissions.PrincipalHit{}
 	deniedPrincipal := map[string]bool{}

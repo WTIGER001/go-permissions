@@ -2,8 +2,7 @@ package examples
 
 import (
 	"context"
-	"strconv"
-	"testing"
+		"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -18,8 +17,8 @@ func TestFinanceReadVsExport(t *testing.T) {
 
 	readPerm := permissions.NewTeamPermission("finops.read", "FinOps", "Read FinOps", "Allows reading FinOps data for a team.").WithChecker(svc)
 	exportPerm := permissions.NewTeamPermission("finops.export", "FinOps", "Export FinOps", "Allows exporting FinOps data for a team.").WithChecker(svc)
-	teamID := int64(900)
-	teamScope := strconv.FormatInt(teamID, 10)
+	teamID := "900"
+	teamScope := teamID
 
 	store.AddGrants(
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "analyst", Effect: permissions.EffectAllow, TeamScope: teamScope, PermissionName: readPerm.ID()},

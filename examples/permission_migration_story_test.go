@@ -2,8 +2,7 @@ package examples
 
 import (
 	"context"
-	"strconv"
-	"testing"
+		"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -16,8 +15,8 @@ func TestPermissionMigrationStory(t *testing.T) {
 	identity := inmemory.NewIdentityProvider()
 	svc := permissions.NewService(store, identity)
 
-	teamID := int64(808)
-	teamScope := strconv.FormatInt(teamID, 10)
+	teamID := "808"
+	teamScope := teamID
 	oldPerm := permissions.NewTeamPermission("reports.read", "Reports", "Read Reports", "Allows reading reports.").WithChecker(svc)
 	newPerm := permissions.NewTeamPermission("reports.view", "Reports", "View Reports", "Allows viewing reports.").WithChecker(svc)
 

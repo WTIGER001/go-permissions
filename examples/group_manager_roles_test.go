@@ -71,7 +71,7 @@ func TestGroupManagerRoles(t *testing.T) {
 		t.Fatalf("user2 group5 manage got %v want false", got)
 	}
 
-	hits, err := svc.PrincipalsWithPermission(ctx, nil, "group5", managePerm.ID())
+	hits, err := svc.PrincipalsWithPermission(ctx, "", "group5", managePerm.ID())
 	if err != nil {
 		t.Fatalf("principal hits group5: %v", err)
 	}

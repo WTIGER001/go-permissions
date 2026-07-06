@@ -3,7 +3,6 @@ package inmemory
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/wtiger001/go-permissions"
@@ -174,11 +173,8 @@ func (s *Store) GrantsForOwners(_ context.Context, owners []permissions.Principa
 		ownerSet[string(owner.Kind)+":"+owner.ID] = true
 	}
 
-	team := ""
-	hasTeam := req.TeamID != nil
-	if hasTeam {
-		team = strconv.FormatInt(*req.TeamID, 10)
-	}
+	team := req.TeamID
+	hasTeam := req.TeamID != ""
 
 	result := make([]permissions.Grant, 0, len(s.grants))
 	for _, grant := range s.grants {
@@ -218,11 +214,8 @@ func (s *Store) GrantsForPrincipal(ctx context.Context, principal permissions.Pr
 
 func (s *Store) PrincipalsWithGrant(_ context.Context, req permissions.Request) ([]permissions.PrincipalHit, error) {
 	now := time.Now().UTC()
-	team := ""
-	hasTeam := req.TeamID != nil
-	if hasTeam {
-		team = strconv.FormatInt(*req.TeamID, 10)
-	}
+	team := req.TeamID
+	hasTeam := req.TeamID != ""
 
 	allowByPrincipal := map[string]permissions.PrincipalHit{}
 	deniedPrincipal := map[string]bool{}

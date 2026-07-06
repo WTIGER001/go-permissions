@@ -11,7 +11,7 @@ import (
 
 func TestListPrincipalsWithGrant_DenyOverridesAllow(t *testing.T) {
 	store := NewStore()
-	teamID := int64(42)
+	teamID := "42"
 	anyObject := "*"
 
 	store.AddGrants(
@@ -22,7 +22,7 @@ func TestListPrincipalsWithGrant_DenyOverridesAllow(t *testing.T) {
 	)
 
 	hits, err := store.PrincipalsWithGrant(context.Background(), permissions.Request{
-		TeamID: &teamID,
+		TeamID: teamID,
 		Object: "billing",
 		Perm:   "billing.read",
 	})

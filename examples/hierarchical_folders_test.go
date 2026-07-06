@@ -66,7 +66,7 @@ func TestHierarchicalFolders(t *testing.T) {
 		t.Fatalf("bob roadmap got %v want false", got)
 	}
 
-	budgetHits, err := svc.PrincipalsWithPermission(ctx, nil, budgetPath, perm.ID())
+	budgetHits, err := svc.PrincipalsWithPermission(ctx, "", budgetPath, perm.ID())
 	if err != nil {
 		t.Fatalf("budget hits: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestHierarchicalFolders(t *testing.T) {
 		t.Fatalf("unexpected budget owners: %v", budgetLabels)
 	}
 
-	payrollHits, err := svc.PrincipalsWithPermission(ctx, nil, payrollPath, perm.ID())
+	payrollHits, err := svc.PrincipalsWithPermission(ctx, "", payrollPath, perm.ID())
 	if err != nil {
 		t.Fatalf("payroll hits: %v", err)
 	}

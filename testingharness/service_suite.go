@@ -10,7 +10,7 @@ import (
 
 type EffectiveExpectation struct {
 	UserID          string
-	TeamID          *int64
+	TeamID          string
 	ExpectedPerms   []string
 	UnexpectedPerms []string
 }

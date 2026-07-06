@@ -100,7 +100,7 @@ func (p *TeamPermission) WithChecker(checker Checker) *TeamPermission {
 }
 func (p *TeamPermission) WithFields(fields []string) *TeamPermission { p.withFields(fields); return p }
 
-func (p *TeamPermission) Can(ctx context.Context, subject any, teamID int64) bool {
+func (p *TeamPermission) Can(ctx context.Context, subject any, teamID string) bool {
 	userID, err := subjectID(subject)
 	if err != nil {
 		return false
@@ -108,11 +108,11 @@ func (p *TeamPermission) Can(ctx context.Context, subject any, teamID int64) boo
 	return p.CanUserID(ctx, userID, teamID)
 }
 
-func (p *TeamPermission) CanUserID(ctx context.Context, userID string, teamID int64) bool {
+func (p *TeamPermission) CanUserID(ctx context.Context, userID string, teamID string) bool {
 	if err := p.ensureChecker(); err != nil {
 		return false
 	}
-	ok, err := p.checker.HasPermission(ctx, Request{UserID: userID, TeamID: &teamID, Perm: p.id})
+	ok, err := p.checker.HasPermission(ctx, Request{UserID: userID, TeamID: teamID, Perm: p.id})
 	if err != nil {
 		return false
 	}
@@ -120,7 +120,7 @@ func (p *TeamPermission) CanUserID(ctx context.Context, userID string, teamID in
 	return ok
 }
 
-func (p *TeamPermission) Any(ctx context.Context, subject any, teamIDs ...int64) bool {
+func (p *TeamPermission) Any(ctx context.Context, subject any, teamIDs ...string) bool {
 	if len(teamIDs) == 0 {
 		return false
 	}
@@ -137,7 +137,7 @@ func (p *TeamPermission) Any(ctx context.Context, subject any, teamIDs ...int64)
 	return false
 }
 
-func (p *TeamPermission) All(ctx context.Context, subject any, teamIDs ...int64) bool {
+func (p *TeamPermission) All(ctx context.Context, subject any, teamIDs ...string) bool {
 	if len(teamIDs) == 0 {
 		return true
 	}
@@ -154,15 +154,15 @@ func (p *TeamPermission) All(ctx context.Context, subject any, teamIDs ...int64)
 	return true
 }
 
-func (p *TeamPermission) Filter(ctx context.Context, subject any, teamIDs ...int64) []int64 {
+func (p *TeamPermission) Filter(ctx context.Context, subject any, teamIDs ...string) []string {
 	if len(teamIDs) == 0 {
-		return []int64{}
+		return []string{}
 	}
 	userID, err := subjectID(subject)
 	if err != nil {
-		return []int64{}
+		return []string{}
 	}
-	allowed := make([]int64, 0, len(teamIDs))
+	allowed := make([]string, 0, len(teamIDs))
 	for _, teamID := range teamIDs {
 		ok := p.CanUserID(ctx, userID, teamID)
 		if ok {

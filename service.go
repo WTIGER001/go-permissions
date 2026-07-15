@@ -71,6 +71,12 @@ func (s *Service) SetSubjectFunc(fn SubjectFunc) {
 	s.subjectFunc = fn
 }
 
+// WithSubjectFunc is a chainable helper that sets the SubjectFunc and returns the Service.
+func (s *Service) WithSubjectFunc(fn SubjectFunc) *Service {
+	s.subjectFunc = fn
+	return s
+}
+
 // GetSubjectID extracts a string ID from a generic subject, falling back to default logic if no custom function is set.
 func (s *Service) GetSubjectID(ctx context.Context, subject any) (string, error) {
 	if s.subjectFunc != nil {

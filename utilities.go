@@ -69,7 +69,7 @@ func (p *SystemPermission) WithFields(fields []string) *SystemPermission {
 }
 
 func (p *SystemPermission) Can(ctx context.Context, subject any) bool {
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false
 	}
@@ -101,7 +101,7 @@ func (p *TeamPermission) WithChecker(checker Checker) *TeamPermission {
 func (p *TeamPermission) WithFields(fields []string) *TeamPermission { p.withFields(fields); return p }
 
 func (p *TeamPermission) Can(ctx context.Context, subject any, teamID string) bool {
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false
 	}
@@ -124,7 +124,7 @@ func (p *TeamPermission) Any(ctx context.Context, subject any, teamIDs ...string
 	if len(teamIDs) == 0 {
 		return false
 	}
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false
 	}
@@ -141,7 +141,7 @@ func (p *TeamPermission) All(ctx context.Context, subject any, teamIDs ...string
 	if len(teamIDs) == 0 {
 		return true
 	}
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false
 	}
@@ -158,7 +158,7 @@ func (p *TeamPermission) Filter(ctx context.Context, subject any, teamIDs ...str
 	if len(teamIDs) == 0 {
 		return []string{}
 	}
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return []string{}
 	}
@@ -176,7 +176,7 @@ func (p *TeamPermission) AllowedTeams(ctx context.Context, subject any) (allTeam
 	if err := p.ensureChecker(); err != nil {
 		return false, nil, err
 	}
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false, nil, err
 	}
@@ -208,7 +208,7 @@ func (p *ObjectPermission) WithFields(fields []string) *ObjectPermission {
 }
 
 func (p *ObjectPermission) Can(ctx context.Context, subject any, objectID string) bool {
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false
 	}
@@ -231,7 +231,7 @@ func (p *ObjectPermission) CanUserID(ctx context.Context, userID, objectID strin
 }
 
 func (p *ObjectPermission) CanHierarchical(ctx context.Context, subject any, leafID string, parentPath ...string) bool {
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false
 	}
@@ -250,7 +250,7 @@ func (p *ObjectPermission) Any(ctx context.Context, subject any, objectIDs ...st
 	if len(objectIDs) == 0 {
 		return false
 	}
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false
 	}
@@ -267,7 +267,7 @@ func (p *ObjectPermission) All(ctx context.Context, subject any, objectIDs ...st
 	if len(objectIDs) == 0 {
 		return true
 	}
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false
 	}
@@ -284,7 +284,7 @@ func (p *ObjectPermission) Filter(ctx context.Context, subject any, objectIDs ..
 	if len(objectIDs) == 0 {
 		return []string{}
 	}
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return []string{}
 	}
@@ -302,7 +302,7 @@ func (p *ObjectPermission) HierarchicalFilter(ctx context.Context, subject any, 
 	if len(leafIDs) == 0 {
 		return []string{}
 	}
-	userID, err := subjectID(subject)
+	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return []string{}
 	}
@@ -316,7 +316,21 @@ func (p *ObjectPermission) HierarchicalFilter(ctx context.Context, subject any, 
 	return allowed
 }
 
-func subjectID(subject any) (string, error) {
+func extractSubjectID(ctx context.Context, checker Checker, subject any) (string, error) {
+	type subjectIDExtractor interface {
+		GetSubjectID(ctx context.Context, subject any) (string, error)
+	}
+
+	if ext, ok := checker.(subjectIDExtractor); ok {
+		return ext.GetSubjectID(ctx, subject)
+	}
+
+	return DefaultSubjectID(subject)
+}
+
+// DefaultSubjectID extracts a string ID from a generic subject using the built-in rules.
+// It supports string, StringSubject, Subject, and interface{ SubjectID() string }.
+func DefaultSubjectID(subject any) (string, error) {
 	switch v := subject.(type) {
 	case string:
 		if v == "" {

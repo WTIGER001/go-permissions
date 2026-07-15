@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+type SubjectFunc func(ctx context.Context, subject any) (string, error)
+
 type Service struct {
 	identity            IdentityProvider
 	permissions         PermissionStore
@@ -22,6 +24,7 @@ type Service struct {
 	authenticatedRoleID string
 	adminRoleID         string
 	adminGroupID        string
+	subjectFunc         SubjectFunc
 }
 
 // New creates a service with a nil identity provider and an in-memory default store.
@@ -61,6 +64,19 @@ func (s *Service) SetStore(store PermissionStore) error {
 	s.permissions = store
 	s.invalidateDisabledCache()
 	return nil
+}
+
+// SetSubjectFunc updates the function used to extract subject IDs from objects.
+func (s *Service) SetSubjectFunc(fn SubjectFunc) {
+	s.subjectFunc = fn
+}
+
+// GetSubjectID extracts a string ID from a generic subject, falling back to default logic if no custom function is set.
+func (s *Service) GetSubjectID(ctx context.Context, subject any) (string, error) {
+	if s.subjectFunc != nil {
+		return s.subjectFunc(ctx, subject)
+	}
+	return DefaultSubjectID(subject)
 }
 
 // SetBuiltInGrants configures built-in grants used by SaveBuiltIns and SetStore bootstrap.

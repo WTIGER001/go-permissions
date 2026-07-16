@@ -206,6 +206,7 @@ func (m *mockStore) DeleteGrantsForOwner(_ context.Context, _ PrincipalKind, _ s
 func (m *mockStore) DisableBuiltInRole(_ context.Context, _ string) error { return m.err }
 func (m *mockStore) EnableBuiltInRole(_ context.Context, _ string) error  { return m.err }
 func (m *mockStore) DisabledBuiltInRoles(_ context.Context) ([]string, error) { return nil, m.err }
+func (m *mockStore) ListGrants(_ context.Context, _ GrantQuery) (GrantQueryResult, error) { return GrantQueryResult{}, m.err }
 
 
 func TestHasPermission_DenyOverridesAllow(t *testing.T) {

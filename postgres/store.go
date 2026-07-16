@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -94,6 +96,8 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		`create index if not exists idx_role_closure_ancestor on role_closure (ancestor_role_id, descendant_role_id);`,
 		`create index if not exists idx_permission_grants_owner_perm on permission_grants (owner_kind, owner_id, permission_name);`,
 		`create index if not exists idx_permission_grants_match on permission_grants (team_scope, object_scope, permission_name, effect);`,
+		`create index if not exists idx_permission_grants_object on permission_grants (object_scope);`,
+		`create index if not exists idx_permission_grants_perm_pattern on permission_grants (permission_name text_pattern_ops);`,
 	}
 
 	for _, stmt := range stmts {
@@ -825,5 +829,154 @@ func (s *Store) DisabledBuiltInRoles(ctx context.Context) ([]string, error) {
 	}
 
 	return roles, nil
+}
+
+func (s *Store) ListGrants(ctx context.Context, query permissions.GrantQuery) (permissions.GrantQueryResult, error) {
+	var result permissions.GrantQueryResult
+
+	// Build WHERE clause
+	var conditions []string
+	var args []any
+	argID := 1
+
+	if len(query.Principals) > 0 {
+		var principalExprs []string
+		for _, p := range query.Principals {
+			principalExprs = append(principalExprs, fmt.Sprintf("(owner_kind = $%d and owner_id = $%d)", argID, argID+1))
+			args = append(args, string(p.Kind), p.ID)
+			argID += 2
+		}
+		conditions = append(conditions, "("+strings.Join(principalExprs, " or ")+")")
+	}
+
+	if len(query.TeamScopes) > 0 {
+		var teamArgs []string
+		for _, ts := range query.TeamScopes {
+			teamArgs = append(teamArgs, fmt.Sprintf("$%d", argID))
+			args = append(args, ts)
+			argID++
+		}
+		conditions = append(conditions, fmt.Sprintf("team_scope in (%s)", strings.Join(teamArgs, ", ")))
+	}
+
+	if len(query.ObjectScopes) > 0 {
+		var objArgs []string
+		for _, os := range query.ObjectScopes {
+			objArgs = append(objArgs, fmt.Sprintf("$%d", argID))
+			args = append(args, os)
+			argID++
+		}
+		conditions = append(conditions, fmt.Sprintf("object_scope in (%s)", strings.Join(objArgs, ", ")))
+	}
+
+	if len(query.Permissions) > 0 {
+		var permArgs []string
+		for _, p := range query.Permissions {
+			permArgs = append(permArgs, fmt.Sprintf("$%d", argID))
+			args = append(args, p)
+			argID++
+		}
+		conditions = append(conditions, fmt.Sprintf("permission_name in (%s)", strings.Join(permArgs, ", ")))
+	}
+
+	if query.PermissionPrefix != "" {
+		conditions = append(conditions, fmt.Sprintf("permission_name like $%d", argID))
+		args = append(args, query.PermissionPrefix+"%")
+		argID++
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "where " + strings.Join(conditions, " and ")
+	}
+
+	// First, get total count
+	countQuery := "select count(*) from permission_grants " + whereClause
+	if err := s.pool.QueryRow(ctx, countQuery, args...).Scan(&result.TotalCount); err != nil {
+		return result, fmt.Errorf("count grants: %w", err)
+	}
+
+	// Pagination
+	if query.Cursor != "" {
+		cursorVal, err := strconv.ParseInt(query.Cursor, 10, 64)
+		if err != nil {
+			return result, fmt.Errorf("invalid cursor: %w", err)
+		}
+		conditions = append(conditions, fmt.Sprintf("id > $%d", argID))
+		args = append(args, cursorVal)
+		argID++
+		whereClause = "where " + strings.Join(conditions, " and ")
+	}
+
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 50
+	} else if limit > 1000 {
+		limit = 1000
+	}
+
+	sqlQuery := fmt.Sprintf(`
+select
+	id, owner_kind, owner_id, effect, team_scope, object_scope, permission_name, expires_at, field_allowlist, variable_spec
+from permission_grants
+%s
+order by id asc
+limit $%d
+`, whereClause, argID)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, sqlQuery, args...)
+	if err != nil {
+		return result, fmt.Errorf("query grants list: %w", err)
+	}
+	defer rows.Close()
+
+	grants := make([]permissions.Grant, 0, limit)
+	var lastID int64
+	for rows.Next() {
+		var grant permissions.Grant
+		var ownerKind string
+		var effect string
+		var variableSpecRaw []byte
+
+		if err := rows.Scan(
+			&grant.ID,
+			&ownerKind,
+			&grant.OwnerID,
+			&effect,
+			&grant.TeamScope,
+			&grant.ObjectScope,
+			&grant.PermissionName,
+			&grant.ExpiresAt,
+			&grant.RestrictedFields,
+			&variableSpecRaw,
+		); err != nil {
+			return result, fmt.Errorf("scan grant: %w", err)
+		}
+
+		grant.OwnerKind = permissions.PrincipalKind(ownerKind)
+		grant.Effect = permissions.Effect(effect)
+
+		variableSpec := map[string]any{}
+		if len(variableSpecRaw) > 0 {
+			if err := json.Unmarshal(variableSpecRaw, &variableSpec); err != nil {
+				return result, fmt.Errorf("unmarshal variable spec: %w", err)
+			}
+		}
+		grant.VariableSpec = variableSpec
+
+		grants = append(grants, grant)
+		lastID = grant.ID
+	}
+	if err := rows.Err(); err != nil {
+		return result, fmt.Errorf("iterate grants: %w", err)
+	}
+
+	result.Grants = grants
+	if len(grants) == limit {
+		result.NextCursor = strconv.FormatInt(lastID, 10)
+	}
+
+	return result, nil
 }
 

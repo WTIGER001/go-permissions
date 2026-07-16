@@ -23,6 +23,7 @@ type countingStore struct {
 	createRoleCalls          int
 	updateRoleCalls          int
 	deleteRoleCalls          int
+	listGrantsCalls          int
 }
 
 func (s *countingStore) RoleDefinitions(_ context.Context) ([]permissions.Role, error) {
@@ -121,6 +122,13 @@ func (s *countingStore) DeleteGrantsForOwner(_ context.Context, _ permissions.Pr
 	s.deleteRoleCalls++
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *countingStore) ListGrants(ctx context.Context, query permissions.GrantQuery) (permissions.GrantQueryResult, error) {
+	s.mu.Lock()
+	s.listGrantsCalls++
+	s.mu.Unlock()
+	return permissions.GrantQueryResult{}, nil
 }
 
 func (s *countingStore) DisableBuiltInRole(_ context.Context, _ string) error { return nil }

@@ -244,6 +244,30 @@ func (s *Store) DisabledBuiltInRoles(ctx context.Context) ([]string, error) {
 	return s.base.DisabledBuiltInRoles(ctx)
 }
 
+func (s *Store) ListGrants(ctx context.Context, query permissions.GrantQuery) (permissions.GrantQueryResult, error) {
+	key := makeKey("list-grants", map[string]any{"query": query})
+	if cachedValue, ok := s.cache.Get(key); ok {
+		if v, castOK := cachedValue.(permissions.GrantQueryResult); castOK {
+			cloned := v
+			cloned.Grants = cloneGrants(v.Grants)
+			return cloned, nil
+		}
+	}
+
+	value, err := s.base.ListGrants(ctx, query)
+	if err != nil {
+		return permissions.GrantQueryResult{}, err
+	}
+	
+	cloned := value
+	cloned.Grants = cloneGrants(value.Grants)
+	setWithTTL(s.cache, key, cloned, s.ttl)
+	
+	ret := value
+	ret.Grants = cloneGrants(value.Grants)
+	return ret, nil
+}
+
 
 func makeKey(prefix string, value any) string {
 	encoded, err := json.Marshal(value)

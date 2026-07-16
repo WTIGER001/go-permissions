@@ -106,7 +106,13 @@ func (examplePolicyStore) AddRoleInheritance(_ context.Context, _, _ string) err
 func (examplePolicyStore) DeleteGrantsForOwner(_ context.Context, _ PrincipalKind, _ string) error { return nil }
 func (examplePolicyStore) DisableBuiltInRole(_ context.Context, _ string) error { return nil }
 func (examplePolicyStore) EnableBuiltInRole(_ context.Context, _ string) error  { return nil }
-func (examplePolicyStore) DisabledBuiltInRoles(_ context.Context) ([]string, error) { return nil, nil }
+func (e examplePolicyStore) DisabledBuiltInRoles(ctx context.Context) ([]string, error) {
+	return []string{}, nil
+}
+
+func (e examplePolicyStore) ListGrants(ctx context.Context, query GrantQuery) (GrantQueryResult, error) {
+	return GrantQueryResult{}, nil
+}
 
 
 func ExampleNewServiceWithIdentity_customIdentityAdapter() {

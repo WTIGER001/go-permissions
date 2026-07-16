@@ -106,3 +106,43 @@ type Role struct {
 	IsDisabled   bool
 }
 
+type PermissionSource struct {
+	Kind    PrincipalKind
+	ID      string
+	GrantID *int64
+	RoleID  *string
+}
+
+type PermissionReport struct {
+	Principal        PrincipalRef
+	TeamScope        string
+	ObjectScope      *string
+	PermissionName   string
+	Effect           Effect
+	RestrictedFields []string
+	IsDirect         bool
+	Sources          []PermissionSource
+}
+
+type GrantQuery struct {
+	Principals       []PrincipalRef
+	TeamScopes       []string
+	ObjectScopes     []string
+	Permissions      []string
+	PermissionPrefix string
+	IncludeEffective bool
+	Limit            int
+	Cursor           string
+}
+
+type GrantQueryResult struct {
+	Grants     []Grant
+	NextCursor string
+	TotalCount int
+}
+
+type ReportQueryResult struct {
+	Reports    []PermissionReport
+	NextCursor string
+	TotalCount int
+}

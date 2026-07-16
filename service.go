@@ -1598,3 +1598,214 @@ func cloneTimePointer(v *time.Time) *time.Time {
 	copyValue := *v
 	return &copyValue
 }
+
+func (s *Service) GenerateReport(ctx context.Context, query GrantQuery) (ReportQueryResult, error) {
+	if query.IncludeEffective && len(query.Principals) > 0 {
+		return s.generateEffectiveReport(ctx, query)
+	}
+	return s.generateDirectReport(ctx, query)
+}
+
+func (s *Service) generateDirectReport(ctx context.Context, query GrantQuery) (ReportQueryResult, error) {
+	var result ReportQueryResult
+
+	storeResult, err := s.permissions.ListGrants(ctx, query)
+	if err != nil {
+		return result, err
+	}
+
+	result.TotalCount = storeResult.TotalCount
+	result.NextCursor = storeResult.NextCursor
+
+	for _, grant := range storeResult.Grants {
+		grantID := grant.ID
+		report := PermissionReport{
+			Principal:        PrincipalRef{Kind: grant.OwnerKind, ID: grant.OwnerID},
+			TeamScope:        grant.TeamScope,
+			ObjectScope:      grant.ObjectScope,
+			PermissionName:   grant.PermissionName,
+			Effect:           grant.Effect,
+			RestrictedFields: grant.RestrictedFields,
+			IsDirect:         true,
+			Sources: []PermissionSource{
+				{
+					Kind:    grant.OwnerKind,
+					ID:      grant.OwnerID,
+					GrantID: &grantID,
+				},
+			},
+		}
+		result.Reports = append(result.Reports, report)
+	}
+
+	return result, nil
+}
+
+func (s *Service) generateEffectiveReport(ctx context.Context, query GrantQuery) (ReportQueryResult, error) {
+	var result ReportQueryResult
+
+	now := time.Now().UTC()
+	var allReports []PermissionReport
+
+	for _, principal := range query.Principals {
+		directGrants, err := s.permissions.GrantsForPrincipal(ctx, principal)
+		if err != nil {
+			return result, err
+		}
+
+		assignments, err := s.permissions.RoleAssignmentsForPrincipal(ctx, principal)
+		if err != nil {
+			return result, err
+		}
+
+		var roleIDs []string
+		for _, a := range assignments {
+			roleIDs = append(roleIDs, a.RoleID)
+		}
+		
+		if principal.Kind == PrincipalUser {
+			roleIDs = append(roleIDs, SyntheticRoleAuthenticated)
+			// Simple admin group check if IdentityProvider is present
+			if s.adminGroupID != "" && s.identity != nil {
+				inAdmin, _ := s.identity.IsUserInGroup(ctx, principal.ID, s.adminGroupID)
+				if inAdmin {
+					roleIDs = append(roleIDs, SyntheticRoleAdmin)
+				}
+			}
+		}
+		roleIDs = append(roleIDs, SyntheticRolePublic)
+
+		expandedRoleIDs, err := s.permissions.ExpandRoles(ctx, roleIDs)
+		if err != nil {
+			return result, err
+		}
+
+		var defs []Role
+		for _, rID := range expandedRoleIDs {
+			def, err := s.RoleDefinition(ctx, rID)
+			if err == nil && !def.IsDisabled {
+				defs = append(defs, def)
+			}
+		}
+
+		reportMap := make(map[string]*PermissionReport)
+
+		for _, grant := range directGrants {
+			if !grant.IsActiveAt(now) {
+				continue
+			}
+			objScope := ""
+			if grant.ObjectScope != nil {
+				objScope = *grant.ObjectScope
+			}
+			key := fmt.Sprintf("%s:%s:%s:%s", grant.TeamScope, objScope, grant.PermissionName, grant.Effect)
+			
+			grantID := grant.ID
+			if existing, ok := reportMap[key]; ok {
+				existing.Sources = append(existing.Sources, PermissionSource{
+					Kind:    grant.OwnerKind,
+					ID:      grant.OwnerID,
+					GrantID: &grantID,
+				})
+			} else {
+				reportMap[key] = &PermissionReport{
+					Principal:        principal,
+					TeamScope:        grant.TeamScope,
+					ObjectScope:      grant.ObjectScope,
+					PermissionName:   grant.PermissionName,
+					Effect:           grant.Effect,
+					RestrictedFields: grant.RestrictedFields,
+					IsDirect:         true,
+					Sources: []PermissionSource{
+						{
+							Kind:    grant.OwnerKind,
+							ID:      grant.OwnerID,
+							GrantID: &grantID,
+						},
+					},
+				}
+			}
+		}
+
+		for _, def := range defs {
+			for _, perm := range def.Permissions {
+				key := fmt.Sprintf("*::%s:allow", perm) 
+				
+				rID := def.ID
+				if existing, ok := reportMap[key]; ok {
+					existing.IsDirect = false
+					existing.Sources = append(existing.Sources, PermissionSource{
+						Kind:   PrincipalRole,
+						ID:     rID,
+						RoleID: &rID,
+					})
+				} else {
+					objScope := "*"
+					reportMap[key] = &PermissionReport{
+						Principal:        principal,
+						TeamScope:        "*",
+						ObjectScope:      &objScope,
+						PermissionName:   perm,
+						Effect:           EffectAllow,
+						RestrictedFields: nil,
+						IsDirect:         false,
+						Sources: []PermissionSource{
+							{
+								Kind:   PrincipalRole,
+								ID:     rID,
+								RoleID: &rID,
+							},
+						},
+					}
+				}
+			}
+		}
+
+		for _, r := range reportMap {
+			if len(query.TeamScopes) > 0 && !containsString(query.TeamScopes, r.TeamScope) {
+				continue
+			}
+			if len(query.ObjectScopes) > 0 {
+				if r.ObjectScope == nil || !containsString(query.ObjectScopes, *r.ObjectScope) {
+					continue
+				}
+			}
+			if len(query.Permissions) > 0 && !containsString(query.Permissions, r.PermissionName) {
+				continue
+			}
+			if query.PermissionPrefix != "" && !strings.HasPrefix(r.PermissionName, query.PermissionPrefix) {
+				continue
+			}
+			
+			allReports = append(allReports, *r)
+		}
+	}
+
+	result.TotalCount = len(allReports)
+	offset := 0
+	if query.Cursor != "" {
+		parsed, err := strconv.Atoi(query.Cursor)
+		if err == nil {
+			offset = parsed
+		}
+	}
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	end := offset + limit
+	if end > len(allReports) {
+		end = len(allReports)
+	}
+	if offset < len(allReports) {
+		result.Reports = allReports[offset:end]
+	}
+	if end < len(allReports) {
+		result.NextCursor = strconv.Itoa(end)
+	}
+
+	return result, nil
+}
+
+

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -483,3 +484,102 @@ func (s *bootstrapStore) DisabledBuiltInRoles(_ context.Context) ([]string, erro
 	return roles, nil
 }
 
+func (s *bootstrapStore) ListGrants(ctx context.Context, query GrantQuery) (GrantQueryResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var result GrantQueryResult
+	var filtered []Grant
+
+	for _, grant := range s.grants {
+		if len(query.Principals) > 0 {
+			match := false
+			for _, p := range query.Principals {
+				if grant.OwnerKind == p.Kind && grant.OwnerID == p.ID {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+
+		if len(query.TeamScopes) > 0 {
+			match := false
+			for _, ts := range query.TeamScopes {
+				if grant.TeamScope == ts {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+
+		if len(query.ObjectScopes) > 0 {
+			match := false
+			for _, os := range query.ObjectScopes {
+				if grant.ObjectScope != nil && *grant.ObjectScope == os {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+
+		if len(query.Permissions) > 0 {
+			match := false
+			for _, p := range query.Permissions {
+				if grant.PermissionName == p {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+
+		if query.PermissionPrefix != "" {
+			if !strings.HasPrefix(grant.PermissionName, query.PermissionPrefix) {
+				continue
+			}
+		}
+
+		filtered = append(filtered, grant)
+	}
+
+	result.TotalCount = len(filtered)
+	offset := 0
+	if query.Cursor != "" {
+		parsed, err := strconv.Atoi(query.Cursor)
+		if err == nil {
+			offset = parsed
+		}
+	}
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 50
+	} else if limit > 1000 {
+		limit = 1000
+	}
+
+	end := offset + limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	if offset < len(filtered) {
+		result.Grants = filtered[offset:end]
+	} else {
+		result.Grants = []Grant{}
+	}
+	if end < len(filtered) {
+		result.NextCursor = strconv.Itoa(end)
+	}
+
+	return result, nil
+}

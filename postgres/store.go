@@ -53,6 +53,8 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		);`,
 		`alter table roles add column if not exists built_in boolean not null default false;`,
 		`alter table roles add column if not exists is_disabled boolean not null default false;`,
+		`alter table roles add column if not exists scope text not null default '';`,
+		`alter table roles add column if not exists tags text[] not null default '{}';`,
 		`create table if not exists role_inheritance (
 			parent_role_id text not null,
 			child_role_id text not null,
@@ -415,7 +417,7 @@ func (s *Store) PrincipalsWithGrant(ctx context.Context, req permissions.Request
 
 func (s *Store) RoleDefinitions(ctx context.Context) ([]permissions.Role, error) {
 	const query = `
-select id, code, coalesce(description, ''), built_in, is_disabled
+select id, code, coalesce(description, ''), built_in, is_disabled, coalesce(scope, ''), coalesce(tags, '{}')
 from roles
 order by id
 `
@@ -429,9 +431,16 @@ order by id
 	roles := make([]permissions.Role, 0, 16)
 	for rows.Next() {
 		var role permissions.Role
-		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.BuiltIn, &role.IsDisabled); err != nil {
+		var scope string
+		var tags []string
+		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.BuiltIn, &role.IsDisabled, &scope, &tags); err != nil {
 			return nil, fmt.Errorf("scan role definition: %w", err)
 		}
+		role.Scope = permissions.RoleScope(scope)
+		if tags == nil {
+			tags = []string{}
+		}
+		role.Tags = tags
 		role.VariableSpec = map[string]any{}
 		role.Permissions = []string{}
 		roles = append(roles, role)
@@ -449,16 +458,23 @@ func (s *Store) RoleDefinition(ctx context.Context, roleID string) (permissions.
 	}
 
 	const query = `
-select id, code, coalesce(description, ''), built_in, is_disabled
+select id, code, coalesce(description, ''), built_in, is_disabled, coalesce(scope, ''), coalesce(tags, '{}')
 from roles
 where id = $1
 `
 
 	var role permissions.Role
-	if err := s.pool.QueryRow(ctx, query, roleID).Scan(&role.ID, &role.Name, &role.Description, &role.BuiltIn, &role.IsDisabled); err != nil {
+	var scope string
+	var tags []string
+	if err := s.pool.QueryRow(ctx, query, roleID).Scan(&role.ID, &role.Name, &role.Description, &role.BuiltIn, &role.IsDisabled, &scope, &tags); err != nil {
 		return permissions.Role{}, fmt.Errorf("query role definition: %w", err)
 	}
 
+	role.Scope = permissions.RoleScope(scope)
+	if tags == nil {
+		tags = []string{}
+	}
+	role.Tags = tags
 	role.VariableSpec = map[string]any{}
 	role.Permissions = []string{}
 	return role, nil
@@ -478,11 +494,16 @@ func (s *Store) CreateRole(ctx context.Context, role permissions.Role) error {
 	}
 	defer tx.Rollback(ctx)
 
+	tags := role.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
 	const insertRole = `
-insert into roles (id, code, description, built_in, is_disabled)
-values ($1, $2, $3, $4, $5)
+insert into roles (id, code, description, built_in, is_disabled, scope, tags)
+values ($1, $2, $3, $4, $5, $6, $7)
 `
-	if _, err := tx.Exec(ctx, insertRole, role.ID, role.Name, role.Description, role.BuiltIn, role.IsDisabled); err != nil {
+	if _, err := tx.Exec(ctx, insertRole, role.ID, role.Name, role.Description, role.BuiltIn, role.IsDisabled, string(role.Scope), tags); err != nil {
 		return fmt.Errorf("insert role: %w", err)
 	}
 
@@ -511,12 +532,17 @@ func (s *Store) UpdateRole(ctx context.Context, role permissions.Role) error {
 		return fmt.Errorf("role name is required")
 	}
 
+	tags := role.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
 	const stmt = `
 update roles
-set code = $2, description = $3, built_in = $4, is_disabled = $5, updated_at = now()
+set code = $2, description = $3, built_in = $4, is_disabled = $5, scope = $6, tags = $7, updated_at = now()
 where id = $1
 `
-	tag, err := s.pool.Exec(ctx, stmt, role.ID, role.Name, role.Description, role.BuiltIn, role.IsDisabled)
+	tag, err := s.pool.Exec(ctx, stmt, role.ID, role.Name, role.Description, role.BuiltIn, role.IsDisabled, string(role.Scope), tags)
 	if err != nil {
 		return fmt.Errorf("update role: %w", err)
 	}

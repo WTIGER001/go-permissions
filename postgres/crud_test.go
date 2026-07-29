@@ -16,6 +16,8 @@ func TestPostgres_CRUD_Roles(t *testing.T) {
 	role1 := permissions.Role{
 		ID:          "role.crud_tester",
 		Name:        "CRUD Tester",
+		Scope:       permissions.RoleScopeTeam,
+		Tags:        []string{"test", "crud"},
 		Permissions: []string{"test.read", "test.write"},
 	}
 	err := store.CreateRole(ctx, role1)
@@ -31,9 +33,17 @@ func TestPostgres_CRUD_Roles(t *testing.T) {
 	if role.Name != "CRUD Tester" {
 		t.Errorf("Unexpected role name: %s", role.Name)
 	}
+	if role.Scope != permissions.RoleScopeTeam {
+		t.Errorf("Unexpected role scope: %s", role.Scope)
+	}
+	if len(role.Tags) != 2 || role.Tags[0] != "test" || role.Tags[1] != "crud" {
+		t.Errorf("Unexpected role tags: %v", role.Tags)
+	}
 
 	// Update Role
 	role.Name = "CRUD Tester Updated"
+	role.Scope = permissions.RoleScopeSystem
+	role.Tags = []string{"test", "updated"}
 	err = store.UpdateRole(ctx, role)
 	if err != nil {
 		t.Fatalf("UpdateRole failed: %v", err)
@@ -41,6 +51,12 @@ func TestPostgres_CRUD_Roles(t *testing.T) {
 	role, _ = store.RoleDefinition(ctx, "role.crud_tester")
 	if role.Name != "CRUD Tester Updated" {
 		t.Errorf("UpdateRole didn't stick")
+	}
+	if role.Scope != permissions.RoleScopeSystem {
+		t.Errorf("UpdateRole scope didn't stick: %s", role.Scope)
+	}
+	if len(role.Tags) != 2 || role.Tags[1] != "updated" {
+		t.Errorf("UpdateRole tags didn't stick: %v", role.Tags)
 	}
 
 	// RoleDefinitions

@@ -2,7 +2,16 @@ package permissions
 
 import (
 	"fmt"
+	"strings"
 	"time"
+)
+
+type RoleScope string
+
+const (
+	RoleScopeSystem RoleScope = "system"
+	RoleScopeTeam   RoleScope = "team"
+	RoleScopeObject RoleScope = "object"
 )
 
 type PrincipalKind string
@@ -100,10 +109,22 @@ type Role struct {
 	ID           string
 	Name         string
 	Description  string
+	Scope        RoleScope
+	Tags         []string
 	VariableSpec map[string]any
 	Permissions  []string
 	BuiltIn      bool
 	IsDisabled   bool
+}
+
+func (r Role) Validate() error {
+	if strings.TrimSpace(r.ID) == "" {
+		return fmt.Errorf("role ID is required")
+	}
+	if r.Scope != "" && r.Scope != RoleScopeSystem && r.Scope != RoleScopeTeam && r.Scope != RoleScopeObject {
+		return fmt.Errorf("invalid role scope: %q", r.Scope)
+	}
+	return nil
 }
 
 type PermissionSource struct {

@@ -1255,6 +1255,46 @@ func (s *Service) RoleDefinitions(ctx context.Context) ([]Role, error) {
 	return result, nil
 }
 
+// RoleDefinitionsByScope returns all active role definitions matching the specified scope.
+func (s *Service) RoleDefinitionsByScope(ctx context.Context, scope RoleScope) ([]Role, error) {
+	allRoles, err := s.RoleDefinitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]Role, 0, len(allRoles))
+	for _, r := range allRoles {
+		if r.Scope == scope {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered, nil
+}
+
+// RoleDefinitionsByTag returns all active role definitions containing the specified tag.
+func (s *Service) RoleDefinitionsByTag(ctx context.Context, tag string) ([]Role, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return []Role{}, nil
+	}
+
+	allRoles, err := s.RoleDefinitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]Role, 0, len(allRoles))
+	for _, r := range allRoles {
+		for _, t := range r.Tags {
+			if strings.EqualFold(t, tag) {
+				filtered = append(filtered, r)
+				break
+			}
+		}
+	}
+	return filtered, nil
+}
+
 // RoleDefinition retrieves a single role definition by ID.
 func (s *Service) RoleDefinition(ctx context.Context, roleID string) (Role, error) {
 	if role, ok := s.builtIns.Role(roleID); ok {

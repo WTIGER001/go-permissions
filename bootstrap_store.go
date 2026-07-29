@@ -40,7 +40,7 @@ func (s *bootstrapStore) RoleDefinitions(_ context.Context) ([]Role, error) {
 
 	roles := make([]Role, 0, len(s.roles))
 	for _, role := range s.roles {
-		roles = append(roles, role)
+		roles = append(roles, cloneRole(role))
 	}
 	sort.Slice(roles, func(i, j int) bool { return roles[i].ID < roles[j].ID })
 	return roles, nil
@@ -54,7 +54,7 @@ func (s *bootstrapStore) RoleDefinition(_ context.Context, roleID string) (Role,
 	if !ok {
 		return Role{}, fmt.Errorf("role not found: %s", roleID)
 	}
-	return role, nil
+	return cloneRole(role), nil
 }
 
 func (s *bootstrapStore) CreateRole(_ context.Context, role Role) error {
@@ -71,7 +71,7 @@ func (s *bootstrapStore) CreateRole(_ context.Context, role Role) error {
 	if _, exists := s.roles[role.ID]; exists {
 		return fmt.Errorf("role already exists: %s", role.ID)
 	}
-	s.roles[role.ID] = role
+	s.roles[role.ID] = cloneRole(role)
 	// Every role is its own ancestor at depth 0.
 	if s.roleClosure[role.ID] == nil {
 		s.roleClosure[role.ID] = map[string]bool{}
@@ -94,7 +94,7 @@ func (s *bootstrapStore) UpdateRole(_ context.Context, role Role) error {
 	if _, exists := s.roles[role.ID]; !exists {
 		return fmt.Errorf("role not found: %s", role.ID)
 	}
-	s.roles[role.ID] = role
+	s.roles[role.ID] = cloneRole(role)
 	return nil
 }
 
@@ -422,6 +422,19 @@ func mapEquals(left, right map[string]any) bool {
 		}
 	}
 	return true
+}
+
+func cloneRole(role Role) Role {
+	copyRole := role
+	copyRole.Tags = append([]string(nil), role.Tags...)
+	copyRole.Permissions = append([]string(nil), role.Permissions...)
+	if role.VariableSpec != nil {
+		copyRole.VariableSpec = map[string]any{}
+		for k, v := range role.VariableSpec {
+			copyRole.VariableSpec[k] = v
+		}
+	}
+	return copyRole
 }
 
 func cloneGrant(grant Grant) Grant {

@@ -1411,3 +1411,76 @@ func TestService_ProxyMethods(t *testing.T) {
 		t.Fatalf("DeleteRole failed: %v", err)
 	}
 }
+
+func TestRoleDefinitionsByScopeAndTag(t *testing.T) {
+	svc := New()
+	ctx := context.Background()
+
+	err := svc.AddBuiltInRole(ctx, Role{
+		ID:    "builtin.sys-operator",
+		Name:  "System Operator",
+		Scope: RoleScopeSystem,
+		Tags:  []string{"system", "ops"},
+	})
+	if err != nil {
+		t.Fatalf("AddBuiltInRole failed: %v", err)
+	}
+
+	err = svc.CreateRole(ctx, Role{
+		ID:    "role.team-admin",
+		Name:  "Team Admin",
+		Scope: RoleScopeTeam,
+		Tags:  []string{"team", "admin"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRole failed: %v", err)
+	}
+
+	// Test RoleDefinitionsByScope
+	sysRoles, err := svc.RoleDefinitionsByScope(ctx, RoleScopeSystem)
+	if err != nil {
+		t.Fatalf("RoleDefinitionsByScope failed: %v", err)
+	}
+	foundSys := false
+	for _, r := range sysRoles {
+		if r.ID == "builtin.sys-operator" {
+			foundSys = true
+			break
+		}
+	}
+	if !foundSys {
+		t.Errorf("expected builtin.sys-operator in system roles")
+	}
+
+	teamRoles, err := svc.RoleDefinitionsByScope(ctx, RoleScopeTeam)
+	if err != nil {
+		t.Fatalf("RoleDefinitionsByScope failed: %v", err)
+	}
+	foundTeam := false
+	for _, r := range teamRoles {
+		if r.ID == "role.team-admin" {
+			foundTeam = true
+			break
+		}
+	}
+	if !foundTeam {
+		t.Errorf("expected role.team-admin in team roles")
+	}
+
+	// Test RoleDefinitionsByTag
+	opsRoles, err := svc.RoleDefinitionsByTag(ctx, "ops")
+	if err != nil {
+		t.Fatalf("RoleDefinitionsByTag failed: %v", err)
+	}
+	if len(opsRoles) != 1 || opsRoles[0].ID != "builtin.sys-operator" {
+		t.Errorf("expected 1 ops role, got %v", opsRoles)
+	}
+
+	adminRoles, err := svc.RoleDefinitionsByTag(ctx, "admin")
+	if err != nil {
+		t.Fatalf("RoleDefinitionsByTag failed: %v", err)
+	}
+	if len(adminRoles) != 1 || adminRoles[0].ID != "role.team-admin" {
+		t.Errorf("expected 1 admin role, got %v", adminRoles)
+	}
+}

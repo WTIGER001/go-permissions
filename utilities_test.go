@@ -48,10 +48,10 @@ func TestUtilities_DefaultSubjectID(t *testing.T) {
 
 func TestUtilities_CustomSubjectFunc(t *testing.T) {
 	ctx := context.Background()
-	
+
 	// Create a real service to test the integration
 	svc := New()
-	
+
 	// Configure the custom subject function
 	svc.SetSubjectFunc(func(ctx context.Context, subject any) (string, error) {
 		if u, ok := subject.(customTestUser); ok {
@@ -62,13 +62,13 @@ func TestUtilities_CustomSubjectFunc(t *testing.T) {
 	})
 
 	// Grant the permission so HasPermission returns true
-	svc.AllowUser(ctx, "custom-id-97", "test.custom", nil)
+	svc.AllowUser(ctx, "custom-id-99", "test.custom", nil)
 	svc.AllowUser(ctx, "standard-id", "test.custom", nil)
 
 	sysPerm := NewSystemPermission("test.custom", "test", "test", "test").WithChecker(svc)
 
 	// 1. Test the custom type
-	u := customTestUser{dbID: "custom-id-97"}
+	u := customTestUser{dbID: "custom-id-99"}
 	if !sysPerm.Can(ctx, u) {
 		t.Errorf("expected Can to return true using custom subject func")
 	}

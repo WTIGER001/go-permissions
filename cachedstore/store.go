@@ -184,6 +184,14 @@ func (s *Store) AssignRole(ctx context.Context, principal permissions.PrincipalR
 	return nil
 }
 
+func (s *Store) UnassignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string) error {
+	if err := s.base.UnassignRole(ctx, principal, roleID); err != nil {
+		return err
+	}
+	s.InvalidateAll()
+	return nil
+}
+
 func (s *Store) CreateRole(ctx context.Context, role permissions.Role) error {
 	if err := s.base.CreateRole(ctx, role); err != nil {
 		return err
@@ -258,16 +266,15 @@ func (s *Store) ListGrants(ctx context.Context, query permissions.GrantQuery) (p
 	if err != nil {
 		return permissions.GrantQueryResult{}, err
 	}
-	
+
 	cloned := value
 	cloned.Grants = cloneGrants(value.Grants)
 	setWithTTL(s.cache, key, cloned, s.ttl)
-	
+
 	ret := value
 	ret.Grants = cloneGrants(value.Grants)
 	return ret, nil
 }
-
 
 func makeKey(prefix string, value any) string {
 	encoded, err := json.Marshal(value)

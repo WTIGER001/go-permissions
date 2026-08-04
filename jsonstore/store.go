@@ -19,10 +19,10 @@ type Data struct {
 	UserRoleAssignments  map[string][]permissions.RoleAssignment `json:"user_role_assignments"`
 	GroupRoleAssignments map[string][]permissions.RoleAssignment `json:"group_role_assignments"`
 	// RoleInheritance stores the direct parent->children edges for persistence.
-	RoleInheritance      map[string][]string                     `json:"role_inheritance"`
+	RoleInheritance map[string][]string `json:"role_inheritance"`
 	// RoleExpansion is kept for backward-compatible test seeding only.
-	RoleExpansion        map[string][]string                     `json:"role_expansion"`
-	Grants               []permissions.Grant                     `json:"grants"`
+	RoleExpansion map[string][]string `json:"role_expansion"`
+	Grants        []permissions.Grant `json:"grants"`
 }
 
 type Store struct {
@@ -147,6 +147,60 @@ func (s *Store) AssignRole(_ context.Context, principal permissions.PrincipalRef
 		return fmt.Errorf("role assignments support only user or group principals")
 	}
 	s.mu.Unlock()
+
+	return s.Save()
+}
+
+func (s *Store) UnassignRole(
+	_ context.Context,
+	principal permissions.PrincipalRef,
+	roleID string,
+) error {
+	if err := principal.Validate(); err != nil {
+		return err
+	}
+
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var assignments []permissions.RoleAssignment
+
+	switch principal.Kind {
+	case permissions.PrincipalUser:
+		assignments = s.data.UserRoleAssignments[principal.ID]
+	case permissions.PrincipalGroup:
+		assignments = s.data.GroupRoleAssignments[principal.ID]
+	default:
+		return fmt.Errorf("role assignments support only user or group principals")
+	}
+
+	// Filter out only the matching roleID
+	filtered := assignments[:0]
+	for _, a := range assignments {
+		if a.RoleID != roleID {
+			filtered = append(filtered, a)
+		}
+	}
+
+	// Store back
+	switch principal.Kind {
+	case permissions.PrincipalUser:
+		if len(filtered) == 0 {
+			delete(s.data.UserRoleAssignments, principal.ID)
+		} else {
+			s.data.UserRoleAssignments[principal.ID] = filtered
+		}
+	case permissions.PrincipalGroup:
+		if len(filtered) == 0 {
+			delete(s.data.GroupRoleAssignments, principal.ID)
+		} else {
+			s.data.GroupRoleAssignments[principal.ID] = filtered
+		}
+	}
 
 	return s.Save()
 }
@@ -578,7 +632,6 @@ func (s *Store) ListGrants(ctx context.Context, query permissions.GrantQuery) (p
 
 	return result, nil
 }
-
 
 func emptyData() Data {
 	return Data{

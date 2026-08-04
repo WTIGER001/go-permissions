@@ -15,12 +15,12 @@ type Store struct {
 	groupRoleAssignments map[string][]permissions.RoleAssignment
 	// roleExpansion holds the explicitly set expansion for testing convenience
 	// (legacy helper kept for direct test seeding; AddRoleInheritance is preferred).
-	roleExpansion        map[string][]string
+	roleExpansion map[string][]string
 	// roleInheritance maps parent -> set of direct child role IDs.
-	roleInheritance      map[string]map[string]bool
+	roleInheritance map[string]map[string]bool
 	// roleClosure maps ancestor -> set of all descendant role IDs (transitive).
-	roleClosure         map[string]map[string]bool
-	grants               []permissions.Grant
+	roleClosure map[string]map[string]bool
+	grants      []permissions.Grant
 }
 
 var _ permissions.PermissionStore = (*Store)(nil)
@@ -31,7 +31,7 @@ func NewStore() *Store {
 		groupRoleAssignments: map[string][]permissions.RoleAssignment{},
 		roleExpansion:        map[string][]string{},
 		roleInheritance:      map[string]map[string]bool{},
-		roleClosure:         map[string]map[string]bool{},
+		roleClosure:          map[string]map[string]bool{},
 		grants:               []permissions.Grant{},
 	}
 }
@@ -40,8 +40,60 @@ func (s *Store) AddUserRoleAssignments(userID string, assignments ...permissions
 	s.userRoleAssignments[userID] = append(s.userRoleAssignments[userID], assignments...)
 }
 
+func (s *Store) RemoveUserRoleAssignments(userID string, roleIDs ...string) {
+	// Convert roleIDs slice to a lookup set for efficiency
+	removeSet := make(map[string]struct{}, len(roleIDs))
+	for _, r := range roleIDs {
+		removeSet[r] = struct{}{}
+	}
+
+	// Get existing role assignments
+	assignments := s.userRoleAssignments[userID]
+
+	// Filter
+	filtered := assignments[:0] // reuse underlying array
+	for _, ra := range assignments {
+		if _, shouldRemove := removeSet[ra.RoleID]; !shouldRemove {
+			filtered = append(filtered, ra)
+		}
+	}
+
+	// Store updated list
+	if len(filtered) == 0 {
+		delete(s.userRoleAssignments, userID)
+	} else {
+		s.userRoleAssignments[userID] = filtered
+	}
+}
+
 func (s *Store) AddGroupRoleAssignments(groupID string, assignments ...permissions.RoleAssignment) {
 	s.groupRoleAssignments[groupID] = append(s.groupRoleAssignments[groupID], assignments...)
+}
+
+func (s *Store) RemoveGroupRoleAssignments(groupID string, roleIDs ...string) {
+	// Convert roleIDs slice to a lookup set for efficiency
+	removeSet := make(map[string]struct{}, len(roleIDs))
+	for _, r := range roleIDs {
+		removeSet[r] = struct{}{}
+	}
+
+	// Get existing role assignments
+	assignments := s.groupRoleAssignments[groupID]
+
+	// Filter
+	filtered := assignments[:0] // reuse underlying array
+	for _, ra := range assignments {
+		if _, shouldRemove := removeSet[ra.RoleID]; !shouldRemove {
+			filtered = append(filtered, ra)
+		}
+	}
+
+	// Store updated list
+	if len(filtered) == 0 {
+		delete(s.groupRoleAssignments, groupID)
+	} else {
+		s.groupRoleAssignments[groupID] = filtered
+	}
 }
 
 // SetRoleExpansion is a legacy helper for direct test seeding of the expansion
@@ -124,6 +176,23 @@ func (s *Store) AssignRole(_ context.Context, principal permissions.PrincipalRef
 		s.AddGroupRoleAssignments(principal.ID, assignment)
 	default:
 		return fmt.Errorf("role assignments support only user or group principals")
+	}
+
+	return nil
+}
+
+func (s *Store) UnassignRole(_ context.Context, principal permissions.PrincipalRef, roleID string) error {
+	if err := principal.Validate(); err != nil {
+		return err
+	}
+
+	switch principal.Kind {
+	case permissions.PrincipalUser:
+		s.RemoveUserRoleAssignments(principal.ID, roleID)
+	case permissions.PrincipalGroup:
+		s.RemoveGroupRoleAssignments(principal.ID, roleID)
+	default:
+		return fmt.Errorf("role unassignments support only user or group principals")
 	}
 
 	return nil
@@ -326,7 +395,7 @@ func (s *Store) ListGrants(ctx context.Context, query permissions.GrantQuery) (p
 				continue
 			}
 		}
-		
+
 		if len(query.TeamScopes) > 0 {
 			match := false
 			for _, ts := range query.TeamScopes {
@@ -409,4 +478,3 @@ func (s *Store) ListGrants(ctx context.Context, query permissions.GrantQuery) (p
 
 	return result, nil
 }
-

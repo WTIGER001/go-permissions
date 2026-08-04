@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -795,6 +796,52 @@ insert into principal_roles (
 	return nil
 }
 
+func (s *Store) UnassignRole(
+	ctx context.Context,
+	principal permissions.PrincipalRef,
+	roleID string,
+) error {
+	if err := principal.Validate(); err != nil {
+		return err
+	}
+	if principal.Kind != permissions.PrincipalUser && principal.Kind != permissions.PrincipalGroup {
+		return fmt.Errorf("role assignments support only user or group principals")
+	}
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+
+	const stmt = `
+delete from principal_roles
+where principal_kind = $1
+  and principal_id = $2
+  and role_id = $3
+returning role_id
+`
+
+	var deleted string
+	err := s.pool.QueryRow(
+		ctx,
+		stmt,
+		string(principal.Kind),
+		principal.ID,
+		roleID,
+	).Scan(&deleted)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf(
+				"role %q was not assigned to principal %s",
+				roleID,
+				principal.ID,
+			)
+		}
+		return fmt.Errorf("delete principal role assignment: %w", err)
+	}
+
+	return nil
+}
+
 func (s *Store) DeleteGrantsForOwner(ctx context.Context, ownerKind permissions.PrincipalKind, ownerID string) error {
 	if ownerID == "" {
 		return fmt.Errorf("owner ID is required")
@@ -1005,4 +1052,3 @@ limit $%d
 
 	return result, nil
 }
-

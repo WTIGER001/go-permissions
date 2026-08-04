@@ -185,6 +185,37 @@ func (m *mockStore) AssignRole(_ context.Context, principal PrincipalRef, roleID
 	return m.err
 }
 
+func (m *mockStore) UnassignRole(
+	_ context.Context,
+	principal PrincipalRef,
+	roleID string,
+) error {
+	assignments := m.assignedRoles
+
+	found := false
+	filtered := assignments[:0]
+
+	for _, a := range assignments {
+		// match only roleID + principal identity encoded in BindingValues
+		if a.RoleID == roleID &&
+			a.BindingValues["principal_kind"] == string(principal.Kind) &&
+			a.BindingValues["principal_id"] == principal.ID {
+
+			found = true
+			continue // remove it
+		}
+
+		filtered = append(filtered, a)
+	}
+
+	if !found {
+		return fmt.Errorf("role %q was not assigned to principal %s", roleID, principal.ID)
+	}
+
+	m.assignedRoles = filtered
+	return m.err
+}
+
 func (m *mockStore) CreateRole(_ context.Context, role Role) error {
 	m.createRoleCalls++
 	if m.err != nil {
@@ -199,15 +230,18 @@ func (m *mockStore) CreateRole(_ context.Context, role Role) error {
 	m.rolesByID[role.ID] = role
 	return nil
 }
-func (m *mockStore) UpdateRole(_ context.Context, _ Role) error   { return m.err }
-func (m *mockStore) DeleteRole(_ context.Context, _ string) error { return m.err }
+func (m *mockStore) UpdateRole(_ context.Context, _ Role) error              { return m.err }
+func (m *mockStore) DeleteRole(_ context.Context, _ string) error            { return m.err }
 func (m *mockStore) AddRoleInheritance(_ context.Context, _, _ string) error { return m.err }
-func (m *mockStore) DeleteGrantsForOwner(_ context.Context, _ PrincipalKind, _ string) error { return m.err }
-func (m *mockStore) DisableBuiltInRole(_ context.Context, _ string) error { return m.err }
-func (m *mockStore) EnableBuiltInRole(_ context.Context, _ string) error  { return m.err }
+func (m *mockStore) DeleteGrantsForOwner(_ context.Context, _ PrincipalKind, _ string) error {
+	return m.err
+}
+func (m *mockStore) DisableBuiltInRole(_ context.Context, _ string) error     { return m.err }
+func (m *mockStore) EnableBuiltInRole(_ context.Context, _ string) error      { return m.err }
 func (m *mockStore) DisabledBuiltInRoles(_ context.Context) ([]string, error) { return nil, m.err }
-func (m *mockStore) ListGrants(_ context.Context, _ GrantQuery) (GrantQueryResult, error) { return GrantQueryResult{}, m.err }
-
+func (m *mockStore) ListGrants(_ context.Context, _ GrantQuery) (GrantQueryResult, error) {
+	return GrantQueryResult{}, m.err
+}
 
 func TestHasPermission_DenyOverridesAllow(t *testing.T) {
 	teamID := "42"
@@ -976,7 +1010,6 @@ func TestSaveBuiltIns_UsesBulkEnsurePath(t *testing.T) {
 		t.Fatalf("expected built-ins to be stored in memory")
 	}
 }
-
 
 func TestHasPermission_MultiTenantRole_BothTeamsAllowed(t *testing.T) {
 	team42 := "42"

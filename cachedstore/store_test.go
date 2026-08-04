@@ -19,6 +19,7 @@ type countingStore struct {
 	grantsForOwnersCalls     int
 	principalsWithGrantCalls int
 	roleAssignWriteCalls     int
+	roleUnassignWriteCalls   int
 	grantWriteCalls          int
 	createRoleCalls          int
 	updateRoleCalls          int
@@ -89,6 +90,13 @@ func (s *countingStore) AssignRole(_ context.Context, _ permissions.PrincipalRef
 	return nil
 }
 
+func (s *countingStore) UnassignRole(_ context.Context, _ permissions.PrincipalRef, _ string) error {
+	s.mu.Lock()
+	s.roleUnassignWriteCalls++
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *countingStore) CreateRole(_ context.Context, _ permissions.Role) error {
 	s.mu.Lock()
 	s.createRoleCalls++
@@ -136,7 +144,6 @@ func (s *countingStore) EnableBuiltInRole(_ context.Context, _ string) error  { 
 func (s *countingStore) DisabledBuiltInRoles(_ context.Context) ([]string, error) {
 	return []string{}, nil
 }
-
 
 func TestStore_CachesReadResults(t *testing.T) {
 	base := &countingStore{}

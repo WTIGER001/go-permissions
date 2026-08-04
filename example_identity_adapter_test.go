@@ -99,11 +99,16 @@ func (examplePolicyStore) CreateGrant(_ context.Context, _ Grant) error { return
 func (examplePolicyStore) AssignRole(_ context.Context, _ PrincipalRef, _ string, _ map[string]any) error {
 	return nil
 }
-func (examplePolicyStore) CreateRole(_ context.Context, _ Role) error   { return nil }
-func (examplePolicyStore) UpdateRole(_ context.Context, _ Role) error   { return nil }
-func (examplePolicyStore) DeleteRole(_ context.Context, _ string) error { return nil }
+func (examplePolicyStore) UnassignRole(_ context.Context, _ PrincipalRef, _ string) error {
+	return nil
+}
+func (examplePolicyStore) CreateRole(_ context.Context, _ Role) error              { return nil }
+func (examplePolicyStore) UpdateRole(_ context.Context, _ Role) error              { return nil }
+func (examplePolicyStore) DeleteRole(_ context.Context, _ string) error            { return nil }
 func (examplePolicyStore) AddRoleInheritance(_ context.Context, _, _ string) error { return nil }
-func (examplePolicyStore) DeleteGrantsForOwner(_ context.Context, _ PrincipalKind, _ string) error { return nil }
+func (examplePolicyStore) DeleteGrantsForOwner(_ context.Context, _ PrincipalKind, _ string) error {
+	return nil
+}
 func (examplePolicyStore) DisableBuiltInRole(_ context.Context, _ string) error { return nil }
 func (examplePolicyStore) EnableBuiltInRole(_ context.Context, _ string) error  { return nil }
 func (e examplePolicyStore) DisabledBuiltInRoles(ctx context.Context) ([]string, error) {
@@ -113,7 +118,6 @@ func (e examplePolicyStore) DisabledBuiltInRoles(ctx context.Context) ([]string,
 func (e examplePolicyStore) ListGrants(ctx context.Context, query GrantQuery) (GrantQueryResult, error) {
 	return GrantQueryResult{}, nil
 }
-
 
 func ExampleNewServiceWithIdentity_customIdentityAdapter() {
 	identity := exampleIdentityAdapter{

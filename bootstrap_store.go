@@ -236,6 +236,47 @@ func (s *bootstrapStore) AssignRole(_ context.Context, principal PrincipalRef, r
 	return nil
 }
 
+func (s *bootstrapStore) UnassignRole(_ context.Context, principal PrincipalRef, roleID string) error {
+	if err := principal.Validate(); err != nil {
+		return err
+	}
+	if roleID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := principalKey(principal)
+	assignments := s.assignments[key]
+
+	// Track whether anything matched
+	found := false
+
+	// Filter in place
+	filtered := assignments[:0]
+	for _, a := range assignments {
+		if a.RoleID == roleID {
+			found = true
+			// skip this one (i.e., remove)
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+
+	if !found {
+		return fmt.Errorf("role %q was not assigned to principal %s", roleID, key)
+	}
+
+	if len(filtered) == 0 {
+		delete(s.assignments, key)
+	} else {
+		s.assignments[key] = filtered
+	}
+
+	return nil
+}
+
 func (s *bootstrapStore) GrantsForPrincipal(_ context.Context, principal PrincipalRef) ([]Grant, error) {
 	if err := principal.Validate(); err != nil {
 		return nil, err

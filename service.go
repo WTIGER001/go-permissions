@@ -1435,6 +1435,11 @@ func (s *Service) AssignRole(ctx context.Context, principal PrincipalRef, roleID
 	return s.permissions.AssignRole(ctx, principal, roleID, bindingValues)
 }
 
+// UnassignRole unassigns a role from a principal.
+func (s *Service) UnAssignRole(ctx context.Context, principal PrincipalRef, roleID string) error {
+	return s.permissions.UnassignRole(ctx, principal, roleID)
+}
+
 // GrantsForPrincipal retrieves active grants for the specified principal.
 // If the principal is a built-in role, it fetches from the in-memory built-in registry.
 // Otherwise, it queries the database store.
@@ -1702,7 +1707,7 @@ func (s *Service) generateEffectiveReport(ctx context.Context, query GrantQuery)
 		for _, a := range assignments {
 			roleIDs = append(roleIDs, a.RoleID)
 		}
-		
+
 		if principal.Kind == PrincipalUser {
 			roleIDs = append(roleIDs, SyntheticRoleAuthenticated)
 			// Simple admin group check if IdentityProvider is present
@@ -1739,7 +1744,7 @@ func (s *Service) generateEffectiveReport(ctx context.Context, query GrantQuery)
 				objScope = *grant.ObjectScope
 			}
 			key := fmt.Sprintf("%s:%s:%s:%s", grant.TeamScope, objScope, grant.PermissionName, grant.Effect)
-			
+
 			grantID := grant.ID
 			if existing, ok := reportMap[key]; ok {
 				existing.Sources = append(existing.Sources, PermissionSource{
@@ -1769,8 +1774,8 @@ func (s *Service) generateEffectiveReport(ctx context.Context, query GrantQuery)
 
 		for _, def := range defs {
 			for _, perm := range def.Permissions {
-				key := fmt.Sprintf("*::%s:allow", perm) 
-				
+				key := fmt.Sprintf("*::%s:allow", perm)
+
 				rID := def.ID
 				if existing, ok := reportMap[key]; ok {
 					existing.IsDirect = false
@@ -1816,7 +1821,7 @@ func (s *Service) generateEffectiveReport(ctx context.Context, query GrantQuery)
 			if query.PermissionPrefix != "" && !strings.HasPrefix(r.PermissionName, query.PermissionPrefix) {
 				continue
 			}
-			
+
 			allReports = append(allReports, *r)
 		}
 	}
@@ -1847,5 +1852,3 @@ func (s *Service) generateEffectiveReport(ctx context.Context, query GrantQuery)
 
 	return result, nil
 }
-
-

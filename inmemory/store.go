@@ -40,20 +40,15 @@ func (s *Store) AddUserRoleAssignments(userID string, assignments ...permissions
 	s.userRoleAssignments[userID] = append(s.userRoleAssignments[userID], assignments...)
 }
 
-func (s *Store) RemoveUserRoleAssignments(userID string, roleIDs ...string) {
-	// Convert roleIDs slice to a lookup set for efficiency
-	removeSet := make(map[string]struct{}, len(roleIDs))
-	for _, r := range roleIDs {
-		removeSet[r] = struct{}{}
-	}
-
+func (s *Store) RemoveUserRoleAssignment(userID string, roleID string, bindingValues map[string]any) {
 	// Get existing role assignments
 	assignments := s.userRoleAssignments[userID]
 
 	// Filter
 	filtered := assignments[:0] // reuse underlying array
 	for _, ra := range assignments {
-		if _, shouldRemove := removeSet[ra.RoleID]; !shouldRemove {
+		// Keep assignment if it does NOT match both roleID and binding values
+		if !(ra.RoleID == roleID && permissions.BindingValuesEqual(ra.BindingValues, bindingValues)) {
 			filtered = append(filtered, ra)
 		}
 	}
@@ -70,20 +65,15 @@ func (s *Store) AddGroupRoleAssignments(groupID string, assignments ...permissio
 	s.groupRoleAssignments[groupID] = append(s.groupRoleAssignments[groupID], assignments...)
 }
 
-func (s *Store) RemoveGroupRoleAssignments(groupID string, roleIDs ...string) {
-	// Convert roleIDs slice to a lookup set for efficiency
-	removeSet := make(map[string]struct{}, len(roleIDs))
-	for _, r := range roleIDs {
-		removeSet[r] = struct{}{}
-	}
-
+func (s *Store) RemoveGroupRoleAssignment(groupID string, roleID string, bindingValues map[string]any) {
 	// Get existing role assignments
 	assignments := s.groupRoleAssignments[groupID]
 
 	// Filter
 	filtered := assignments[:0] // reuse underlying array
 	for _, ra := range assignments {
-		if _, shouldRemove := removeSet[ra.RoleID]; !shouldRemove {
+		// Keep assignment if it does NOT match both roleID and binding values
+		if !(ra.RoleID == roleID && permissions.BindingValuesEqual(ra.BindingValues, bindingValues)) {
 			filtered = append(filtered, ra)
 		}
 	}
@@ -181,16 +171,16 @@ func (s *Store) AssignRole(_ context.Context, principal permissions.PrincipalRef
 	return nil
 }
 
-func (s *Store) UnassignRole(_ context.Context, principal permissions.PrincipalRef, roleID string) error {
+func (s *Store) UnassignRole(_ context.Context, principal permissions.PrincipalRef, roleID string, bindingValues map[string]any) error {
 	if err := principal.Validate(); err != nil {
 		return err
 	}
 
 	switch principal.Kind {
 	case permissions.PrincipalUser:
-		s.RemoveUserRoleAssignments(principal.ID, roleID)
+		s.RemoveUserRoleAssignment(principal.ID, roleID, bindingValues)
 	case permissions.PrincipalGroup:
-		s.RemoveGroupRoleAssignments(principal.ID, roleID)
+		s.RemoveGroupRoleAssignment(principal.ID, roleID, bindingValues)
 	default:
 		return fmt.Errorf("role unassignments support only user or group principals")
 	}

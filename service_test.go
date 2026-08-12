@@ -185,35 +185,47 @@ func (m *mockStore) AssignRole(_ context.Context, principal PrincipalRef, roleID
 	return m.err
 }
 
+
 func (m *mockStore) UnassignRole(
-	_ context.Context,
-	principal PrincipalRef,
-	roleID string,
+    _ context.Context,
+    principal PrincipalRef,
+    roleID string,
+    bindingValues map[string]any,
 ) error {
-	assignments := m.assignedRoles
+    assignments := m.assignedRoles
+    found := false
+    filtered := assignments[:0]
 
-	found := false
-	filtered := assignments[:0]
+    for _, a := range assignments {
+        // Must match the roleID
+        if a.RoleID != roleID {
+            filtered = append(filtered, a)
+            continue
+        }
 
-	for _, a := range assignments {
-		// match only roleID + principal identity encoded in BindingValues
-		if a.RoleID == roleID &&
-			a.BindingValues["principal_kind"] == string(principal.Kind) &&
-			a.BindingValues["principal_id"] == principal.ID {
+        // Must match binding values exactly
+        if !BindingValuesEqual(a.BindingValues, bindingValues) {
+            filtered = append(filtered, a)
+            continue
+        }
 
-			found = true
-			continue // remove it
-		}
+        // Must match principal identity
+        if a.BindingValues["principal_kind"] != string(principal.Kind) ||
+           a.BindingValues["principal_id"] != principal.ID {
+            filtered = append(filtered, a)
+            continue
+        }
 
-		filtered = append(filtered, a)
-	}
+        // If we got here, we found the exact assignment; skip it (remove)
+        found = true
+    }
 
-	if !found {
-		return fmt.Errorf("role %q was not assigned to principal %s", roleID, principal.ID)
-	}
+    if !found {
+        return fmt.Errorf("role %q was not assigned to principal %s", roleID, principal.ID)
+    }
 
-	m.assignedRoles = filtered
-	return m.err
+    m.assignedRoles = filtered
+    return m.err
 }
 
 func (m *mockStore) CreateRole(_ context.Context, role Role) error {

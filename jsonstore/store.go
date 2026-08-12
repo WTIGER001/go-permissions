@@ -155,6 +155,7 @@ func (s *Store) UnassignRole(
 	_ context.Context,
 	principal permissions.PrincipalRef,
 	roleID string,
+	bindingValues map[string]any,
 ) error {
 	if err := principal.Validate(); err != nil {
 		return err
@@ -178,10 +179,11 @@ func (s *Store) UnassignRole(
 		return fmt.Errorf("role assignments support only user or group principals")
 	}
 
-	// Filter out only the matching roleID
+	// Filter out matching roleID + matching binding values
 	filtered := assignments[:0]
 	for _, a := range assignments {
-		if a.RoleID != roleID {
+		// Keep assignment if it does NOT match both roleID and binding values
+		if !(a.RoleID == roleID && permissions.BindingValuesEqual(a.BindingValues, bindingValues)) {
 			filtered = append(filtered, a)
 		}
 	}

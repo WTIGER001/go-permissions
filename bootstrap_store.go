@@ -236,7 +236,7 @@ func (s *bootstrapStore) AssignRole(_ context.Context, principal PrincipalRef, r
 	return nil
 }
 
-func (s *bootstrapStore) UnassignRole(_ context.Context, principal PrincipalRef, roleID string) error {
+func (s *bootstrapStore) UnassignRole(_ context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
 	if err := principal.Validate(); err != nil {
 		return err
 	}
@@ -256,7 +256,7 @@ func (s *bootstrapStore) UnassignRole(_ context.Context, principal PrincipalRef,
 	// Filter in place
 	filtered := assignments[:0]
 	for _, a := range assignments {
-		if a.RoleID == roleID {
+		if a.RoleID == roleID && BindingValuesEqual(a.BindingValues, bindingValues) {
 			found = true
 			// skip this one (i.e., remove)
 			continue

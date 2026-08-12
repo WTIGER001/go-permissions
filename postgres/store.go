@@ -800,7 +800,9 @@ func (s *Store) UnassignRole(
 	ctx context.Context,
 	principal permissions.PrincipalRef,
 	roleID string,
+	bindingValues map[string]any,
 ) error {
+
 	if err := principal.Validate(); err != nil {
 		return err
 	}
@@ -816,23 +818,32 @@ delete from principal_roles
 where principal_kind = $1
   and principal_id = $2
   and role_id = $3
+  and binding_values = $4::jsonb
 returning role_id
 `
 
+	// Convert Go map to JSONB
+	bvJSON, err := json.Marshal(bindingValues)
+	if err != nil {
+		return fmt.Errorf("marshal bindingValues: %w", err)
+	}
+
 	var deleted string
-	err := s.pool.QueryRow(
+	err = s.pool.QueryRow(
 		ctx,
 		stmt,
 		string(principal.Kind),
 		principal.ID,
 		roleID,
+		bvJSON,
 	).Scan(&deleted)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf(
-				"role %q was not assigned to principal %s",
+				"role %q with bindingValues %+v was not assigned to principal %s",
 				roleID,
+				bindingValues,
 				principal.ID,
 			)
 		}

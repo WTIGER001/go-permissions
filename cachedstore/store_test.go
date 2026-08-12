@@ -90,7 +90,7 @@ func (s *countingStore) AssignRole(_ context.Context, _ permissions.PrincipalRef
 	return nil
 }
 
-func (s *countingStore) UnassignRole(_ context.Context, _ permissions.PrincipalRef, _ string) error {
+func (s *countingStore) UnassignRole(_ context.Context, _ permissions.PrincipalRef, _ string, _ map[string]any) error {
 	s.mu.Lock()
 	s.roleUnassignWriteCalls++
 	s.mu.Unlock()

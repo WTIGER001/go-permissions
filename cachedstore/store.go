@@ -184,8 +184,8 @@ func (s *Store) AssignRole(ctx context.Context, principal permissions.PrincipalR
 	return nil
 }
 
-func (s *Store) UnassignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string) error {
-	if err := s.base.UnassignRole(ctx, principal, roleID); err != nil {
+func (s *Store) UnassignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string, bindingValues map[string]any) error {
+	if err := s.base.UnassignRole(ctx, principal, roleID, bindingValues); err != nil {
 		return err
 	}
 	s.InvalidateAll()

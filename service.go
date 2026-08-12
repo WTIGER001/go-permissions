@@ -1436,8 +1436,8 @@ func (s *Service) AssignRole(ctx context.Context, principal PrincipalRef, roleID
 }
 
 // UnassignRole unassigns a role from a principal.
-func (s *Service) UnAssignRole(ctx context.Context, principal PrincipalRef, roleID string) error {
-	return s.permissions.UnassignRole(ctx, principal, roleID)
+func (s *Service) UnassignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
+	return s.permissions.UnassignRole(ctx, principal, roleID, bindingValues)
 }
 
 // GrantsForPrincipal retrieves active grants for the specified principal.

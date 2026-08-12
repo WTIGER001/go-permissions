@@ -99,7 +99,7 @@ func (examplePolicyStore) CreateGrant(_ context.Context, _ Grant) error { return
 func (examplePolicyStore) AssignRole(_ context.Context, _ PrincipalRef, _ string, _ map[string]any) error {
 	return nil
 }
-func (examplePolicyStore) UnassignRole(_ context.Context, _ PrincipalRef, _ string) error {
+func (examplePolicyStore) UnassignRole(_ context.Context, _ PrincipalRef, _ string, _ map[string]any) error {
 	return nil
 }
 func (examplePolicyStore) CreateRole(_ context.Context, _ Role) error              { return nil }

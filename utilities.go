@@ -3,6 +3,7 @@ package permissions
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -372,4 +373,32 @@ func buildHierarchyObject(leafID string, parentPath ...string) (string, error) {
 		parts = append(parts, parent)
 	}
 	return strings.Join(parts, "/"), nil
+}
+
+// Helper to compare maps
+func BindingValuesEqual(a, b map[string]any) bool {
+	// nil/nil case
+	if a == nil && b == nil {
+		return true
+	}
+	// one is nil, the other isn't
+	if (a == nil) != (b == nil) {
+		return false
+	}
+
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k, av := range a {
+		bv, ok := b[k]
+		if !ok {
+			return false
+		}
+		if !reflect.DeepEqual(av, bv) {
+			return false
+		}
+	}
+
+	return true
 }

@@ -52,6 +52,12 @@ type RoleAssignment struct {
 	BindingValues map[string]any
 }
 
+type RoleAssignmentHit struct {
+	RoleID        string
+	BindingValues map[string]any
+	PrincipalRef
+}
+
 type Grant struct {
 	ID               int64
 	OwnerKind        PrincipalKind

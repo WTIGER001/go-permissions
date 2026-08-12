@@ -60,6 +60,9 @@ func TestStore_AdditionalCoverage(t *testing.T) {
 	if err := s.AssignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u-1"}, "r-u", map[string]any{"team": 42}); err != nil {
 		t.Fatalf("AssignRole user: %v", err)
 	}
+	if err := s.UnassignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u-1"}, "r-u", map[string]any{"team": 42}); err != nil {
+		t.Fatalf("UnassignRole user: %v", err)
+	}
 
 	if _, err := s.GrantsForPrincipal(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u-1"}); err != nil {
 		t.Fatalf("GrantsForPrincipal: %v", err)

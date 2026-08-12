@@ -46,6 +46,8 @@ func (a exampleIdentityAdapter) IsUserInGroup(_ context.Context, userID, groupID
 
 type examplePolicyStore struct{}
 
+var _ PermissionStore = (*examplePolicyStore)(nil)
+
 func (examplePolicyStore) RoleDefinitions(_ context.Context) ([]Role, error) {
 	return []Role{}, nil
 }
@@ -55,6 +57,10 @@ func (examplePolicyStore) RoleDefinition(_ context.Context, roleID string) (Role
 }
 
 func (examplePolicyStore) RoleAssignmentsForPrincipal(_ context.Context, _ PrincipalRef) ([]RoleAssignment, error) {
+	return nil, nil
+}
+
+func (examplePolicyStore) RoleAssignmentsForRoleID(_ context.Context, _ string) ([]RoleAssignmentHit, error) {
 	return nil, nil
 }
 

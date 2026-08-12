@@ -10,21 +10,22 @@ import (
 )
 
 type countingStore struct {
-	mu                       sync.Mutex
-	roleDefinitionsCalls     int
-	roleDefinitionCalls      int
-	roleAssignmentsCalls     int
-	grantsForPrincipalCalls  int
-	expandRolesCalls         int
-	grantsForOwnersCalls     int
-	principalsWithGrantCalls int
-	roleAssignWriteCalls     int
-	roleUnassignWriteCalls   int
-	grantWriteCalls          int
-	createRoleCalls          int
-	updateRoleCalls          int
-	deleteRoleCalls          int
-	listGrantsCalls          int
+	mu                           sync.Mutex
+	roleDefinitionsCalls         int
+	roleDefinitionCalls          int
+	roleAssignmentsCalls         int
+	roleAssignmentForRoleIdCalls int
+	grantsForPrincipalCalls      int
+	expandRolesCalls             int
+	grantsForOwnersCalls         int
+	principalsWithGrantCalls     int
+	roleAssignWriteCalls         int
+	roleUnassignWriteCalls       int
+	grantWriteCalls              int
+	createRoleCalls              int
+	updateRoleCalls              int
+	deleteRoleCalls              int
+	listGrantsCalls              int
 }
 
 func (s *countingStore) RoleDefinitions(_ context.Context) ([]permissions.Role, error) {
@@ -46,6 +47,16 @@ func (s *countingStore) RoleAssignmentsForPrincipal(_ context.Context, _ permiss
 	s.roleAssignmentsCalls++
 	s.mu.Unlock()
 	return []permissions.RoleAssignment{{RoleID: "r-1", BindingValues: map[string]any{"team": 42}}}, nil
+}
+
+func (s *countingStore) RoleAssignmentsForRoleID(_ context.Context, _ string) ([]permissions.RoleAssignmentHit, error) {
+	s.mu.Lock()
+	s.roleAssignmentForRoleIdCalls++
+	s.mu.Unlock()
+	return []permissions.RoleAssignmentHit{{RoleID: "r-2", BindingValues: map[string]any{"team": 24}, PrincipalRef: permissions.PrincipalRef{
+		Kind: permissions.PrincipalUser,
+		ID:   "u-1",
+	}}}, nil
 }
 
 func (s *countingStore) GrantsForPrincipal(_ context.Context, principal permissions.PrincipalRef) ([]permissions.Grant, error) {
@@ -173,6 +184,13 @@ func TestStore_CachesReadResults(t *testing.T) {
 	}
 	if _, err := store.RoleAssignmentsForPrincipal(ctx, principal); err != nil {
 		t.Fatalf("second role assignments failed: %v", err)
+	}
+
+	if _, err := store.RoleAssignmentsForRoleID(ctx, "r-2"); err != nil {
+		t.Fatalf("first role assignments for role id failed: %v", err)
+	}
+	if _, err := store.RoleAssignmentsForRoleID(ctx, "r-2"); err != nil {
+		t.Fatalf("second role assignments for role id failed: %v", err)
 	}
 
 	if _, err := store.GrantsForPrincipal(ctx, principal); err != nil {

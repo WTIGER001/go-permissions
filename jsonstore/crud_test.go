@@ -11,13 +11,13 @@ import (
 
 func TestJSONStore_CRUD_HappyPaths(t *testing.T) {
 	ctx := context.Background()
-	
+
 	dir, err := os.MkdirTemp("", "jsonstore_test_*")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
 	defer os.RemoveAll(dir)
-	
+
 	path := filepath.Join(dir, "store.json")
 	store, err := NewStore(path)
 	if err != nil {
@@ -38,7 +38,7 @@ func TestJSONStore_CRUD_HappyPaths(t *testing.T) {
 	if err := store.UpdateRole(ctx, role); err != nil {
 		t.Fatalf("UpdateRole: %v", err)
 	}
-	
+
 	if err := store.DeleteRole(ctx, "role.test"); err != nil {
 		t.Fatalf("DeleteRole: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestJSONStore_CRUD_HappyPaths(t *testing.T) {
 	if err := store.CreateGrant(ctx, grant); err != nil {
 		t.Fatalf("CreateGrant: %v", err)
 	}
-	
+
 	// AssignRole
 	if err := store.AssignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u1"}, "role.test", nil); err != nil {
 		t.Fatalf("AssignRole: %v", err)
@@ -111,6 +111,18 @@ func TestJSONStore_CRUD_HappyPaths(t *testing.T) {
 	}
 	if len(assigns) != 1 {
 		t.Fatalf("Expected 1 assignment, got %d", len(assigns))
+	}
+
+	// UnassignRole
+	if err := store.UnassignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u1"}, "role.test", nil); err != nil {
+		t.Fatalf("UnassignRole: %v", err)
+	}
+	assignsForRoleId, err := store.RoleAssignmentsForRoleID(ctx, "role.test")
+	if err != nil {
+		t.Fatalf("ListRoleAssignmentsForUserAndGroups: %v", err)
+	}
+	if len(assignsForRoleId) != 0 {
+		t.Fatalf("Expected 0 assignments, got %d", len(assignsForRoleId))
 	}
 
 	if err := store.DeleteGrantsForOwner(ctx, permissions.PrincipalUser, "u1"); err != nil {

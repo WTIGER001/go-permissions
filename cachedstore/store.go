@@ -100,6 +100,23 @@ func (s *Store) RoleAssignmentsForPrincipal(ctx context.Context, principal permi
 	return cloneRoleAssignments(cloned), nil
 }
 
+func (s *Store) RoleAssignmentsForRoleID(ctx context.Context, roleID string) ([]permissions.RoleAssignmentHit, error) {
+	key := makeKey("role-assignments-for-role-id", roleID)
+	if cachedValue, ok := s.cache.Get(key); ok {
+		if v, castOK := cachedValue.([]permissions.RoleAssignmentHit); castOK {
+			return cloneRoleAssignmentHits(v), nil
+		}
+	}
+
+	value, err := s.base.RoleAssignmentsForRoleID(ctx, roleID)
+	if err != nil {
+		return nil, err
+	}
+	cloned := cloneRoleAssignmentHits(value)
+	setWithTTL(s.cache, key, cloned, s.ttl)
+	return cloneRoleAssignmentHits(cloned), nil
+}
+
 func (s *Store) GrantsForPrincipal(ctx context.Context, principal permissions.PrincipalRef) ([]permissions.Grant, error) {
 	key := makeKey("grants-for-principal", map[string]any{"principal": principal})
 	if cachedValue, ok := s.cache.Get(key); ok {
@@ -311,6 +328,18 @@ func cloneRoleAssignments(values []permissions.RoleAssignment) []permissions.Rol
 	result := make([]permissions.RoleAssignment, 0, len(values))
 	for _, assignment := range values {
 		copied := permissions.RoleAssignment{RoleID: assignment.RoleID, BindingValues: cloneMap(assignment.BindingValues)}
+		result = append(result, copied)
+	}
+	return result
+}
+
+func cloneRoleAssignmentHits(values []permissions.RoleAssignmentHit) []permissions.RoleAssignmentHit {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]permissions.RoleAssignmentHit, 0, len(values))
+	for _, assignment := range values {
+		copied := permissions.RoleAssignmentHit{RoleID: assignment.RoleID, BindingValues: cloneMap(assignment.BindingValues), PrincipalRef: assignment.PrincipalRef}
 		result = append(result, copied)
 	}
 	return result

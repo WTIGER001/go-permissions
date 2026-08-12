@@ -199,6 +199,44 @@ func (s *Store) RoleAssignmentsForPrincipal(_ context.Context, principal permiss
 	}
 }
 
+func (s *Store) RoleAssignmentsForRoleID(_ context.Context, roleID string) ([]permissions.RoleAssignmentHit, error) {
+	results := []permissions.RoleAssignmentHit{}
+
+	// Find matching user role assignments
+	for userid, ura := range s.userRoleAssignments {
+		for _, ra := range ura {
+			if ra.RoleID == roleID {
+				results = append(results, permissions.RoleAssignmentHit{
+					RoleID:        roleID,
+					BindingValues: ra.BindingValues,
+					PrincipalRef: permissions.PrincipalRef{
+						Kind: permissions.PrincipalUser,
+						ID:   userid,
+					},
+				})
+			}
+		}
+	}
+
+	// Find matching group role assignments
+	for groupid, gra := range s.groupRoleAssignments {
+		for _, ra := range gra {
+			if ra.RoleID == roleID {
+				results = append(results, permissions.RoleAssignmentHit{
+					RoleID:        roleID,
+					BindingValues: ra.BindingValues,
+					PrincipalRef: permissions.PrincipalRef{
+						Kind: permissions.PrincipalGroup,
+						ID:   groupid,
+					},
+				})
+			}
+		}
+	}
+
+	return results, nil
+}
+
 func (s *Store) ExpandRoles(_ context.Context, roleIDs []string) ([]string, error) {
 	seen := map[string]bool{}
 	expanded := make([]string, 0, len(roleIDs))

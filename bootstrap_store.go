@@ -23,6 +23,8 @@ type bootstrapStore struct {
 	roleClosure map[string]map[string]bool
 }
 
+var _ PermissionStore = (*bootstrapStore)(nil)
+
 func newBootstrapStore() *bootstrapStore {
 	return &bootstrapStore{
 		roles:                map[string]Role{},
@@ -204,6 +206,31 @@ func (s *bootstrapStore) RoleAssignmentsForPrincipal(_ context.Context, principa
 		result = append(result, copied)
 	}
 	return result, nil
+}
+
+func (s *bootstrapStore) RoleAssignmentsForRoleID(_ context.Context, roleID string) ([]RoleAssignmentHit, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	results := []RoleAssignmentHit{}
+	for principalKey, assignments := range s.assignments {
+		p, err := parsePrincipalKey(principalKey)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range assignments {
+			if a.RoleID == roleID {
+				results = append(results, RoleAssignmentHit{
+					RoleID:        roleID,
+					BindingValues: a.BindingValues,
+					PrincipalRef:  p,
+				})
+			}
+		}
+
+	}
+
+	return results, nil
 }
 
 func (s *bootstrapStore) AssignRole(_ context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
@@ -450,6 +477,28 @@ func (s *bootstrapStore) ExpandRoles(_ context.Context, roleIDs []string) ([]str
 
 func principalKey(principal PrincipalRef) string {
 	return string(principal.Kind) + ":" + principal.ID
+}
+
+func parsePrincipalKey(key string) (PrincipalRef, error) {
+	parts := strings.SplitN(key, ":", 2)
+	if len(parts) != 2 {
+		return PrincipalRef{}, fmt.Errorf("invalid principal key: %s", key)
+	}
+
+	kind := PrincipalKind(parts[0])
+	id := parts[1]
+
+	switch kind {
+	case PrincipalUser, PrincipalGroup, PrincipalRole:
+		// valid kinds
+	default:
+		return PrincipalRef{}, fmt.Errorf("invalid principal kind: %s", kind)
+	}
+
+	return PrincipalRef{
+		Kind: kind,
+		ID:   id,
+	}, nil
 }
 
 func mapEquals(left, right map[string]any) bool {

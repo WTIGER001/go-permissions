@@ -85,14 +85,31 @@ func TestPostgres_CRUD_GrantsAndAssignments(t *testing.T) {
 	ctx := context.Background()
 
 	// AssignRole
+	bvals := map[string]any{
+		"test": "test",
+	}
 	uRef := permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u-crud"}
-	err := store.AssignRole(ctx, uRef, "role.dummy", nil)
+	err := store.AssignRole(ctx, uRef, "role.dummy", bvals)
 	if err != nil {
 		t.Fatalf("AssignRole failed: %v", err)
 	}
 	assigns, err := store.RoleAssignmentsForPrincipal(ctx, uRef)
 	if err != nil || len(assigns) != 1 {
 		t.Fatalf("RoleAssignmentsForPrincipal failed or returned unexpected: %+v", assigns)
+	}
+	assignsForRoleId, err := store.RoleAssignmentsForRoleID(ctx, "role.dummy")
+	if err != nil || len(assigns) != 1 {
+		t.Fatalf("RoleAssignmentsForRoleID failed or returned unexpected: %+v", assigns)
+	}
+
+	// UnassignRole
+	err = store.UnassignRole(ctx, uRef, "role.dummy", bvals)
+	if err != nil {
+		t.Fatalf("UnassignRole failed: %v", err)
+	}
+	assignsForRoleId, err = store.RoleAssignmentsForRoleID(ctx, "role.dummy")
+	if err != nil || len(assignsForRoleId) != 0 {
+		t.Fatalf("RoleAssignmentsForRoleID failed or returned unexpected: %+v", assignsForRoleId)
 	}
 
 	// CreateGrant
@@ -201,7 +218,7 @@ func TestPostgres_ListGrants(t *testing.T) {
 	if err == nil && res.TotalCount != 1 {
 		t.Errorf("Expected 1 grant for sys.view, got %d", res.TotalCount)
 	}
-	
+
 	// Query 5: Pagination
 	res, err = store.ListGrants(ctx, permissions.GrantQuery{
 		Limit: 2,
@@ -216,10 +233,10 @@ func TestPostgres_ListGrants(t *testing.T) {
 		if res.NextCursor == "" {
 			t.Errorf("Expected next cursor to be set")
 		}
-		
+
 		// Follow cursor
 		res2, err := store.ListGrants(ctx, permissions.GrantQuery{
-			Limit: 2,
+			Limit:  2,
 			Cursor: res.NextCursor,
 		})
 		if err == nil {

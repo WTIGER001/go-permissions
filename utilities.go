@@ -381,10 +381,6 @@ func BindingValuesEqual(a, b map[string]any) bool {
 	if a == nil && b == nil {
 		return true
 	}
-	// one is nil, the other isn't
-	if (a == nil) != (b == nil) {
-		return false
-	}
 
 	if len(a) != len(b) {
 		return false

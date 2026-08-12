@@ -1430,6 +1430,11 @@ func (s *Service) RoleAssignmentsForPrincipal(ctx context.Context, principal Pri
 	return s.permissions.RoleAssignmentsForPrincipal(ctx, principal)
 }
 
+// RoleAssignmentsForRoleID retrieves role assignments for the specified roleID.
+func (s *Service) RoleAssignmentsForRoleID(ctx context.Context, roleID string) ([]RoleAssignmentHit, error) {
+	return s.permissions.RoleAssignmentsForRoleID(ctx, roleID)
+}
+
 // AssignRole assigns a role to a principal.
 func (s *Service) AssignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
 	return s.permissions.AssignRole(ctx, principal, roleID, bindingValues)

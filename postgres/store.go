@@ -198,6 +198,55 @@ where pr.principal_kind = $1 and pr.principal_id = $2
 	return assignments, nil
 }
 
+func (s *Store) RoleAssignmentsForRoleID(ctx context.Context, roleID string) ([]permissions.RoleAssignmentHit, error) {
+	const query = `
+select pr.role_id, pr.binding_values, pr.principal_kind, pr.principal_id
+from principal_roles pr
+where pr.role_id = $1
+`
+
+	rows, err := s.pool.Query(ctx, query, roleID)
+	if err != nil {
+		return nil, fmt.Errorf("query role assignments for roleID %q: %w", roleID, err)
+	}
+	defer rows.Close()
+
+	assignments := make([]permissions.RoleAssignmentHit, 0, 8)
+
+	for rows.Next() {
+		var rid string
+		var bindingRaw []byte
+		var prinicipalKind permissions.PrincipalKind
+		var prinicipalId string
+
+		if err := rows.Scan(&rid, &bindingRaw, &prinicipalKind, &prinicipalId); err != nil {
+			return nil, fmt.Errorf("scan role assignment: %w", err)
+		}
+
+		bindingValues := map[string]any{}
+		if len(bindingRaw) > 0 {
+			if err := json.Unmarshal(bindingRaw, &bindingValues); err != nil {
+				return nil, fmt.Errorf("unmarshal binding values: %w", err)
+			}
+		}
+
+		assignments = append(assignments, permissions.RoleAssignmentHit{
+			RoleID:        rid,
+			BindingValues: bindingValues,
+			PrincipalRef: permissions.PrincipalRef{
+				Kind: prinicipalKind,
+				ID:   prinicipalId,
+			},
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate role assignments: %w", err)
+	}
+
+	return assignments, nil
+}
+
 func (s *Store) ListExpandedRoleIDs(ctx context.Context, roleIDs []string) ([]string, error) {
 	if len(roleIDs) == 0 {
 		return nil, nil
@@ -813,7 +862,24 @@ func (s *Store) UnassignRole(
 		return fmt.Errorf("role ID is required")
 	}
 
-	const stmt = `
+	var stmt string
+	var args []any
+
+	if bindingValues == nil {
+		stmt = `
+delete from principal_roles
+where principal_kind = $1
+  and principal_id = $2
+  and role_id = $3
+returning role_id
+`
+		args = []any{
+			string(principal.Kind),
+			principal.ID,
+			roleID,
+		}
+	} else {
+		stmt = `
 delete from principal_roles
 where principal_kind = $1
   and principal_id = $2
@@ -821,23 +887,21 @@ where principal_kind = $1
   and binding_values = $4::jsonb
 returning role_id
 `
+		bvJSON, err := json.Marshal(bindingValues)
+		if err != nil {
+			return fmt.Errorf("marshal bindingValues: %w", err)
+		}
 
-	// Convert Go map to JSONB
-	bvJSON, err := json.Marshal(bindingValues)
-	if err != nil {
-		return fmt.Errorf("marshal bindingValues: %w", err)
+		args = []any{
+			string(principal.Kind),
+			principal.ID,
+			roleID,
+			bvJSON,
+		}
 	}
 
 	var deleted string
-	err = s.pool.QueryRow(
-		ctx,
-		stmt,
-		string(principal.Kind),
-		principal.ID,
-		roleID,
-		bvJSON,
-	).Scan(&deleted)
-
+	err := s.pool.QueryRow(ctx, stmt, args...).Scan(&deleted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf(

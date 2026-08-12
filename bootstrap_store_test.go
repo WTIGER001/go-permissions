@@ -90,6 +90,20 @@ func TestBootstrapStore_RoleLifecycleAndAssignments(t *testing.T) {
 		t.Fatalf("expected invalid principal validation error")
 	}
 
+	if err := s.UnassignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "missing", binding); err == nil {
+		t.Fatalf("expected role not assigned to principal error")
+	}
+	if err := s.UnassignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "r-a", binding); err != nil {
+		t.Fatalf("unassign role: %v", err)
+	}
+	assignmentsForRoleId, err := s.RoleAssignmentsForRoleID(ctx, "r-a")
+	if err != nil {
+		t.Fatalf("role assignments for roleid: %v", err)
+	}
+	if len(assignmentsForRoleId) != 0 {
+		t.Fatalf("expected assignment count 0, got %d", len(assignmentsForRoleId))
+	}
+
 	if err := s.DeleteRole(ctx, ""); err == nil {
 		t.Fatalf("expected delete missing role ID error")
 	}

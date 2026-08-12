@@ -19,6 +19,7 @@ type PermissionStore interface {
 	// ExpandRoles returns every transitively inherited role.
 	AddRoleInheritance(ctx context.Context, parentRoleID, childRoleID string) error
 	RoleAssignmentsForPrincipal(ctx context.Context, principal PrincipalRef) ([]RoleAssignment, error)
+	RoleAssignmentsForRoleID(ctx context.Context, roleID string) ([]RoleAssignmentHit, error)
 	AssignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error
 	UnassignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error
 	GrantsForPrincipal(ctx context.Context, principal PrincipalRef) ([]Grant, error)

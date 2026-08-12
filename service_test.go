@@ -27,6 +27,8 @@ type mockStore struct {
 	disableBulk     bool
 }
 
+var _ PermissionStore = (*mockStore)(nil)
+
 func (m *mockStore) GetUserGroups(_ context.Context, _ string) ([]string, error) {
 	return append([]string(nil), m.groupIDs...), m.identityErr
 }
@@ -73,6 +75,35 @@ func (m *mockStore) RoleAssignmentsForPrincipal(_ context.Context, principal Pri
 		return append([]RoleAssignment(nil), m.roleAssignments...), m.err
 	}
 	return nil, m.err
+}
+
+func (m *mockStore) RoleAssignmentsForRoleID(_ context.Context, roleID string) ([]RoleAssignmentHit, error) {
+	hits := []RoleAssignmentHit{}
+	for _, ra := range m.roleAssignments {
+		if ra.RoleID == roleID {
+			kind := PrincipalUser
+			bvkind := ra.BindingValues["principal_kind"]
+			if asserted, ok := bvkind.(PrincipalKind); ok {
+				kind = asserted
+			}
+
+			principalID := ""
+			bvPID := ra.BindingValues["principal_id"]
+			if asserted, ok := bvPID.(string); ok {
+				principalID = asserted
+			}
+
+			hits = append(hits, RoleAssignmentHit{
+				RoleID:        roleID,
+				BindingValues: ra.BindingValues,
+				PrincipalRef: PrincipalRef{
+					Kind: kind,
+					ID:   principalID,
+				},
+			})
+		}
+	}
+	return hits, nil
 }
 
 func (m *mockStore) GrantsForPrincipal(_ context.Context, _ PrincipalRef) ([]Grant, error) {
@@ -185,47 +216,46 @@ func (m *mockStore) AssignRole(_ context.Context, principal PrincipalRef, roleID
 	return m.err
 }
 
-
 func (m *mockStore) UnassignRole(
-    _ context.Context,
-    principal PrincipalRef,
-    roleID string,
-    bindingValues map[string]any,
+	_ context.Context,
+	principal PrincipalRef,
+	roleID string,
+	bindingValues map[string]any,
 ) error {
-    assignments := m.assignedRoles
-    found := false
-    filtered := assignments[:0]
+	assignments := m.assignedRoles
+	found := false
+	filtered := assignments[:0]
 
-    for _, a := range assignments {
-        // Must match the roleID
-        if a.RoleID != roleID {
-            filtered = append(filtered, a)
-            continue
-        }
+	for _, a := range assignments {
+		// Must match the roleID
+		if a.RoleID != roleID {
+			filtered = append(filtered, a)
+			continue
+		}
 
-        // Must match binding values exactly
-        if !BindingValuesEqual(a.BindingValues, bindingValues) {
-            filtered = append(filtered, a)
-            continue
-        }
+		// Must match binding values exactly
+		if !BindingValuesEqual(a.BindingValues, bindingValues) {
+			filtered = append(filtered, a)
+			continue
+		}
 
-        // Must match principal identity
-        if a.BindingValues["principal_kind"] != string(principal.Kind) ||
-           a.BindingValues["principal_id"] != principal.ID {
-            filtered = append(filtered, a)
-            continue
-        }
+		// Must match principal identity
+		if a.BindingValues["principal_kind"] != string(principal.Kind) ||
+			a.BindingValues["principal_id"] != principal.ID {
+			filtered = append(filtered, a)
+			continue
+		}
 
-        // If we got here, we found the exact assignment; skip it (remove)
-        found = true
-    }
+		// If we got here, we found the exact assignment; skip it (remove)
+		found = true
+	}
 
-    if !found {
-        return fmt.Errorf("role %q was not assigned to principal %s", roleID, principal.ID)
-    }
+	if !found {
+		return fmt.Errorf("role %q was not assigned to principal %s", roleID, principal.ID)
+	}
 
-    m.assignedRoles = filtered
-    return m.err
+	m.assignedRoles = filtered
+	return m.err
 }
 
 func (m *mockStore) CreateRole(_ context.Context, role Role) error {
@@ -1341,17 +1371,35 @@ func TestService_ProxyMethods(t *testing.T) {
 		t.Error("expected error deleting built-in role")
 	}
 
-	// Test AssignRole and RoleAssignmentsForPrincipal
+	// Test AssignRole, RoleAssignmentsForPrincipal
 	principal := PrincipalRef{Kind: PrincipalUser, ID: "u-1"}
 	if err := svc.AssignRole(ctx, principal, "role.custom", nil); err != nil {
 		t.Fatalf("AssignRole failed: %v", err)
 	}
-
 	assignments, err := svc.RoleAssignmentsForPrincipal(ctx, principal)
 	if err != nil {
 		t.Fatalf("RoleAssignmentsForPrincipal failed: %v", err)
 	}
 	if len(assignments) != 1 || assignments[0].RoleID != "role.custom" {
+		t.Errorf("expected assignment to role.custom, got %+v", assignments)
+	}
+
+	// Test UnassignRole RoleAssignmentsForRoleID
+	assignmentsByRoleId, err := svc.RoleAssignmentsForRoleID(ctx, "role.custom")
+	if err != nil {
+		t.Fatalf("RoleAssignmentsForRoleID failed: %v", err)
+	}
+	if len(assignmentsByRoleId) != 1 || assignmentsByRoleId[0].RoleID != "role.custom" {
+		t.Errorf("expected assignment to role.custom, got %+v", assignments)
+	}
+	if err := svc.UnassignRole(ctx, principal, "role.custom", nil); err != nil {
+		t.Fatalf("UnassignRole failed: %v", err)
+	}
+	assignmentsByRoleId, err = svc.RoleAssignmentsForRoleID(ctx, "role.custom")
+	if err != nil {
+		t.Fatalf("RoleAssignmentsForRoleID failed: %v", err)
+	}
+	if len(assignmentsByRoleId) != 0 {
 		t.Errorf("expected assignment to role.custom, got %+v", assignments)
 	}
 

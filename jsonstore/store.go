@@ -165,17 +165,16 @@ func (s *Store) UnassignRole(
 		return fmt.Errorf("role ID is required")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	var assignments []permissions.RoleAssignment
 
+	s.mu.Lock()
 	switch principal.Kind {
 	case permissions.PrincipalUser:
 		assignments = s.data.UserRoleAssignments[principal.ID]
 	case permissions.PrincipalGroup:
 		assignments = s.data.GroupRoleAssignments[principal.ID]
 	default:
+		s.mu.Unlock()
 		return fmt.Errorf("role assignments support only user or group principals")
 	}
 
@@ -203,6 +202,7 @@ func (s *Store) UnassignRole(
 			s.data.GroupRoleAssignments[principal.ID] = filtered
 		}
 	}
+	s.mu.Unlock()
 
 	return s.Save()
 }
@@ -307,6 +307,47 @@ func (s *Store) RoleAssignmentsForPrincipal(_ context.Context, principal permiss
 	default:
 		return nil, nil
 	}
+}
+
+func (s *Store) RoleAssignmentsForRoleID(_ context.Context, roleID string) ([]permissions.RoleAssignmentHit, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	results := []permissions.RoleAssignmentHit{}
+
+	// Find matching user role assignments
+	for userid, ura := range s.data.UserRoleAssignments {
+		for _, ra := range ura {
+			if ra.RoleID == roleID {
+				results = append(results, permissions.RoleAssignmentHit{
+					RoleID:        roleID,
+					BindingValues: ra.BindingValues,
+					PrincipalRef: permissions.PrincipalRef{
+						Kind: permissions.PrincipalUser,
+						ID:   userid,
+					},
+				})
+			}
+		}
+	}
+
+	// Find matching group role assignments
+	for groupid, gra := range s.data.GroupRoleAssignments {
+		for _, ra := range gra {
+			if ra.RoleID == roleID {
+				results = append(results, permissions.RoleAssignmentHit{
+					RoleID:        roleID,
+					BindingValues: ra.BindingValues,
+					PrincipalRef: permissions.PrincipalRef{
+						Kind: permissions.PrincipalGroup,
+						ID:   groupid,
+					},
+				})
+			}
+		}
+	}
+
+	return cloneRoleAssignmentHits(results), nil
 }
 
 func (s *Store) ListExpandedRoleIDs(_ context.Context, roleIDs []string) ([]string, error) {
@@ -709,6 +750,27 @@ func cloneRoleAssignments(assignments []permissions.RoleAssignment) []permission
 		copied := permissions.RoleAssignment{
 			RoleID:        assignment.RoleID,
 			BindingValues: map[string]any{},
+		}
+		for k, v := range assignment.BindingValues {
+			copied.BindingValues[k] = v
+		}
+		result = append(result, copied)
+	}
+
+	return result
+}
+
+func cloneRoleAssignmentHits(assignments []permissions.RoleAssignmentHit) []permissions.RoleAssignmentHit {
+	if len(assignments) == 0 {
+		return nil
+	}
+
+	result := make([]permissions.RoleAssignmentHit, 0, len(assignments))
+	for _, assignment := range assignments {
+		copied := permissions.RoleAssignmentHit{
+			RoleID:        assignment.RoleID,
+			BindingValues: map[string]any{},
+			PrincipalRef:  assignment.PrincipalRef,
 		}
 		for k, v := range assignment.BindingValues {
 			copied.BindingValues[k] = v

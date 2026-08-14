@@ -122,7 +122,7 @@ func (s *Store) CreateGrant(_ context.Context, grant permissions.Grant) error {
 	return s.Save()
 }
 
-func (s *Store) AssignRole(_ context.Context, principal permissions.PrincipalRef, roleID string, bindingValues map[string]any) error {
+func (s *Store) AssignRole(_ context.Context, principal permissions.PrincipalRef, roleID string, builtIns []permissions.Role, bindingValues map[string]any) error {
 	if err := principal.Validate(); err != nil {
 		return err
 	}
@@ -155,6 +155,7 @@ func (s *Store) UnassignRole(
 	_ context.Context,
 	principal permissions.PrincipalRef,
 	roleID string,
+	builtIns []permissions.Role,
 	bindingValues map[string]any,
 ) error {
 	if err := principal.Validate(); err != nil {

@@ -53,21 +53,21 @@ func TestBootstrapStore_RoleLifecycleAndAssignments(t *testing.T) {
 		t.Fatalf("update role: %v", err)
 	}
 
-	if err := s.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "missing", nil); err == nil {
+	if err := s.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "missing", []Role{}, nil); err == nil {
 		t.Fatalf("expected assign missing role error")
 	}
-	if err := s.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: ""}, "r-a", nil); err == nil {
+	if err := s.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: ""}, "r-a", []Role{}, nil); err == nil {
 		t.Fatalf("expected invalid principal error")
 	}
-	if err := s.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "", nil); err == nil {
+	if err := s.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "", []Role{}, nil); err == nil {
 		t.Fatalf("expected missing role ID assign error")
 	}
 
 	binding := map[string]any{"team": 42}
-	if err := s.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "r-a", binding); err != nil {
+	if err := s.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "r-a", []Role{}, binding); err != nil {
 		t.Fatalf("assign role: %v", err)
 	}
-	if err := s.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "r-a", map[string]any{"team": 42}); err != nil {
+	if err := s.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "r-a", []Role{}, map[string]any{"team": 42}); err != nil {
 		t.Fatalf("dedupe assign role should not fail: %v", err)
 	}
 
@@ -90,10 +90,10 @@ func TestBootstrapStore_RoleLifecycleAndAssignments(t *testing.T) {
 		t.Fatalf("expected invalid principal validation error")
 	}
 
-	if err := s.UnassignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "missing", binding); err == nil {
+	if err := s.UnassignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "missing", []Role{}, binding); err == nil {
 		t.Fatalf("expected role not assigned to principal error")
 	}
-	if err := s.UnassignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "r-a", binding); err != nil {
+	if err := s.UnassignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, "r-a", []Role{}, binding); err != nil {
 		t.Fatalf("unassign role: %v", err)
 	}
 	assignmentsForRoleId, err := s.RoleAssignmentsForRoleID(ctx, "r-a")

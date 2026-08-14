@@ -94,14 +94,14 @@ func (s *countingStore) CreateGrant(_ context.Context, _ permissions.Grant) erro
 	return nil
 }
 
-func (s *countingStore) AssignRole(_ context.Context, _ permissions.PrincipalRef, _ string, _ map[string]any) error {
+func (s *countingStore) AssignRole(_ context.Context, _ permissions.PrincipalRef, _ string, _ []permissions.Role, _ map[string]any) error {
 	s.mu.Lock()
 	s.roleAssignWriteCalls++
 	s.mu.Unlock()
 	return nil
 }
 
-func (s *countingStore) UnassignRole(_ context.Context, _ permissions.PrincipalRef, _ string, _ map[string]any) error {
+func (s *countingStore) UnassignRole(_ context.Context, _ permissions.PrincipalRef, _ string, _ []permissions.Role, _ map[string]any) error {
 	s.mu.Lock()
 	s.roleUnassignWriteCalls++
 	s.mu.Unlock()

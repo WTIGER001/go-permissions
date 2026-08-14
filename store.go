@@ -20,8 +20,8 @@ type PermissionStore interface {
 	AddRoleInheritance(ctx context.Context, parentRoleID, childRoleID string) error
 	RoleAssignmentsForPrincipal(ctx context.Context, principal PrincipalRef) ([]RoleAssignment, error)
 	RoleAssignmentsForRoleID(ctx context.Context, roleID string) ([]RoleAssignmentHit, error)
-	AssignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error
-	UnassignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error
+	AssignRole(ctx context.Context, principal PrincipalRef, roleID string, builtIns []Role, bindingValues map[string]any) error
+	UnassignRole(ctx context.Context, principal PrincipalRef, roleID string, builtIns []Role, bindingValues map[string]any) error
 	GrantsForPrincipal(ctx context.Context, principal PrincipalRef) ([]Grant, error)
 	GrantsForOwners(ctx context.Context, owners []PrincipalRef, req Request) ([]Grant, error)
 	CreateGrant(ctx context.Context, grant Grant) error

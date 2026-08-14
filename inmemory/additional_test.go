@@ -53,14 +53,14 @@ func TestStore_AdditionalCoverage(t *testing.T) {
 
 	// Cover AddGroupRoleAssignments and AssignRole validation branches.
 	s.AddGroupRoleAssignments("g-1", permissions.RoleAssignment{RoleID: "r-g", BindingValues: map[string]any{"team": 1}})
-	if err := s.AssignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalRole, ID: "r-1"}, "r-ignored", nil); err == nil {
+	if err := s.AssignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalRole, ID: "r-1"}, "r-ignored", []permissions.Role{}, nil); err == nil {
 		t.Fatalf("expected assign role to reject role principal kind")
 	}
 
-	if err := s.AssignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u-1"}, "r-u", map[string]any{"team": 42}); err != nil {
+	if err := s.AssignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u-1"}, "r-u", []permissions.Role{}, map[string]any{"team": 42}); err != nil {
 		t.Fatalf("AssignRole user: %v", err)
 	}
-	if err := s.UnassignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u-1"}, "r-u", map[string]any{"team": 42}); err != nil {
+	if err := s.UnassignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u-1"}, "r-u", []permissions.Role{}, map[string]any{"team": 42}); err != nil {
 		t.Fatalf("UnassignRole user: %v", err)
 	}
 

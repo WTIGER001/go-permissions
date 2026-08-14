@@ -102,10 +102,10 @@ func (examplePolicyStore) PrincipalsWithGrant(_ context.Context, _ Request) ([]P
 }
 
 func (examplePolicyStore) CreateGrant(_ context.Context, _ Grant) error { return nil }
-func (examplePolicyStore) AssignRole(_ context.Context, _ PrincipalRef, _ string, _ map[string]any) error {
+func (examplePolicyStore) AssignRole(_ context.Context, _ PrincipalRef, _ string, _ []Role, _ map[string]any) error {
 	return nil
 }
-func (examplePolicyStore) UnassignRole(_ context.Context, _ PrincipalRef, _ string, _ map[string]any) error {
+func (examplePolicyStore) UnassignRole(_ context.Context, _ PrincipalRef, _ string, _ []Role, _ map[string]any) error {
 	return nil
 }
 func (examplePolicyStore) CreateRole(_ context.Context, _ Role) error              { return nil }

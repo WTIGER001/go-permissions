@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -538,6 +539,17 @@ func (s *Store) CreateRole(ctx context.Context, role permissions.Role) error {
 		return fmt.Errorf("role name is required")
 	}
 
+	// Check if role already exists
+	const existsQuery = `select 1 from roles where id = $1`
+	var dummy int
+	err := s.pool.QueryRow(ctx, existsQuery, role.ID).Scan(&dummy)
+	if err == nil {
+		return fmt.Errorf("role already exists: %s", role.ID)
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("check role existence: %w", err)
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -809,7 +821,7 @@ insert into permission_grants (
 	return nil
 }
 
-func (s *Store) AssignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string, bindingValues map[string]any) error {
+func (s *Store) AssignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string, builtIns []permissions.Role, bindingValues map[string]any) error {
 	if err := principal.Validate(); err != nil {
 		return err
 	}
@@ -818,6 +830,17 @@ func (s *Store) AssignRole(ctx context.Context, principal permissions.PrincipalR
 	}
 	if roleID == "" {
 		return fmt.Errorf("role ID is required")
+	}
+
+	// Check if role exists
+	roleCheckA := slices.ContainsFunc(builtIns, func(r permissions.Role) bool {
+		return r.ID == roleID
+	})
+	const existsQuery = `select 1 from roles where id = $1`
+	var dummy int
+	err := s.pool.QueryRow(ctx, existsQuery, roleID).Scan(&dummy)
+	if err != nil && errors.Is(err, pgx.ErrNoRows) && !roleCheckA {
+		return fmt.Errorf("role not found: %s", roleID)
 	}
 
 	bindingCopy := map[string]any{}
@@ -849,6 +872,7 @@ func (s *Store) UnassignRole(
 	ctx context.Context,
 	principal permissions.PrincipalRef,
 	roleID string,
+	builtIns []permissions.Role,
 	bindingValues map[string]any,
 ) error {
 
@@ -860,6 +884,17 @@ func (s *Store) UnassignRole(
 	}
 	if roleID == "" {
 		return fmt.Errorf("role ID is required")
+	}
+
+	// Check if role exists
+	roleCheckA := slices.ContainsFunc(builtIns, func(r permissions.Role) bool {
+		return r.ID == roleID
+	})
+	const existsQuery = `select 1 from roles where id = $1`
+	var dummy int
+	err := s.pool.QueryRow(ctx, existsQuery, roleID).Scan(&dummy)
+	if err != nil && errors.Is(err, pgx.ErrNoRows) && !roleCheckA {
+		return fmt.Errorf("role not found: %s", roleID)
 	}
 
 	var stmt string
@@ -901,7 +936,7 @@ returning role_id
 	}
 
 	var deleted string
-	err := s.pool.QueryRow(ctx, stmt, args...).Scan(&deleted)
+	err = s.pool.QueryRow(ctx, stmt, args...).Scan(&deleted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf(

@@ -205,7 +205,7 @@ func (m *mockStore) CreateGrants(_ context.Context, grants []Grant) error {
 	return m.err
 }
 
-func (m *mockStore) AssignRole(_ context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
+func (m *mockStore) AssignRole(_ context.Context, principal PrincipalRef, roleID string, builtIns []Role, bindingValues map[string]any) error {
 	assignment := RoleAssignment{RoleID: roleID, BindingValues: map[string]any{}}
 	for k, v := range bindingValues {
 		assignment.BindingValues[k] = v
@@ -220,6 +220,7 @@ func (m *mockStore) UnassignRole(
 	_ context.Context,
 	principal PrincipalRef,
 	roleID string,
+	builtIns []Role,
 	bindingValues map[string]any,
 ) error {
 	assignments := m.assignedRoles

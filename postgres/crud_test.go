@@ -84,12 +84,21 @@ func TestPostgres_CRUD_GrantsAndAssignments(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
+	// CreateRole
+	err := store.CreateRole(ctx, permissions.Role{
+		ID:   "role.dummy",
+		Name: "Dummy Role",
+	})
+	if err != nil {
+		t.Fatalf("CreateRole failed: %v", err)
+	}
+
 	// AssignRole
 	bvals := map[string]any{
 		"test": "test",
 	}
 	uRef := permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u-crud"}
-	err := store.AssignRole(ctx, uRef, "role.dummy", bvals)
+	err = store.AssignRole(ctx, uRef, "role.dummy", []permissions.Role{}, bvals)
 	if err != nil {
 		t.Fatalf("AssignRole failed: %v", err)
 	}
@@ -103,7 +112,7 @@ func TestPostgres_CRUD_GrantsAndAssignments(t *testing.T) {
 	}
 
 	// UnassignRole
-	err = store.UnassignRole(ctx, uRef, "role.dummy", bvals)
+	err = store.UnassignRole(ctx, uRef, "role.dummy", []permissions.Role{}, bvals)
 	if err != nil {
 		t.Fatalf("UnassignRole failed: %v", err)
 	}

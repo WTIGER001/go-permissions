@@ -63,7 +63,7 @@ func TestJSONStore_CRUD_HappyPaths(t *testing.T) {
 	}
 
 	// AssignRole
-	if err := store.AssignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u1"}, "role.test", nil); err != nil {
+	if err := store.AssignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u1"}, "role.test", []permissions.Role{}, nil); err != nil {
 		t.Fatalf("AssignRole: %v", err)
 	}
 
@@ -114,7 +114,7 @@ func TestJSONStore_CRUD_HappyPaths(t *testing.T) {
 	}
 
 	// UnassignRole
-	if err := store.UnassignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u1"}, "role.test", nil); err != nil {
+	if err := store.UnassignRole(ctx, permissions.PrincipalRef{Kind: permissions.PrincipalUser, ID: "u1"}, "role.test", []permissions.Role{}, nil); err != nil {
 		t.Fatalf("UnassignRole: %v", err)
 	}
 	assignsForRoleId, err := store.RoleAssignmentsForRoleID(ctx, "role.test")

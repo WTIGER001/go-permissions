@@ -3,6 +3,7 @@ package permissions
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -233,7 +234,7 @@ func (s *bootstrapStore) RoleAssignmentsForRoleID(_ context.Context, roleID stri
 	return results, nil
 }
 
-func (s *bootstrapStore) AssignRole(_ context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
+func (s *bootstrapStore) AssignRole(_ context.Context, principal PrincipalRef, roleID string, builtIns []Role, bindingValues map[string]any) error {
 	if err := principal.Validate(); err != nil {
 		return err
 	}
@@ -244,7 +245,12 @@ func (s *bootstrapStore) AssignRole(_ context.Context, principal PrincipalRef, r
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.roles[roleID]; !exists {
+	roleCheckA := slices.ContainsFunc(builtIns, func(r Role) bool {
+		return r.ID == roleID
+	})
+	_, roleCheckB := s.roles[roleID]
+
+	if !roleCheckA && !roleCheckB {
 		return fmt.Errorf("role not found: %s", roleID)
 	}
 
@@ -263,7 +269,7 @@ func (s *bootstrapStore) AssignRole(_ context.Context, principal PrincipalRef, r
 	return nil
 }
 
-func (s *bootstrapStore) UnassignRole(_ context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
+func (s *bootstrapStore) UnassignRole(_ context.Context, principal PrincipalRef, roleID string, builtIns []Role, bindingValues map[string]any) error {
 	if err := principal.Validate(); err != nil {
 		return err
 	}

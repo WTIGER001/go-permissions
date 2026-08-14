@@ -193,16 +193,16 @@ func (s *Store) CreateGrant(ctx context.Context, grant permissions.Grant) error 
 	return nil
 }
 
-func (s *Store) AssignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string, bindingValues map[string]any) error {
-	if err := s.base.AssignRole(ctx, principal, roleID, cloneMap(bindingValues)); err != nil {
+func (s *Store) AssignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string, builtIns []permissions.Role, bindingValues map[string]any) error {
+	if err := s.base.AssignRole(ctx, principal, roleID, builtIns, cloneMap(bindingValues)); err != nil {
 		return err
 	}
 	s.InvalidateAll()
 	return nil
 }
 
-func (s *Store) UnassignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string, bindingValues map[string]any) error {
-	if err := s.base.UnassignRole(ctx, principal, roleID, bindingValues); err != nil {
+func (s *Store) UnassignRole(ctx context.Context, principal permissions.PrincipalRef, roleID string, builtIns []permissions.Role, bindingValues map[string]any) error {
+	if err := s.base.UnassignRole(ctx, principal, roleID, builtIns, bindingValues); err != nil {
 		return err
 	}
 	s.InvalidateAll()

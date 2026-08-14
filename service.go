@@ -302,7 +302,7 @@ func (s *Service) AssignRoleToUser(ctx context.Context, userID, roleID string, b
 		copyBinding[k] = v
 	}
 
-	return s.permissions.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: userID}, roleID, copyBinding)
+	return s.permissions.AssignRole(ctx, PrincipalRef{Kind: PrincipalUser, ID: userID}, roleID, s.builtIns.Roles(), copyBinding)
 }
 
 func (s *Service) HasSystemPermission(ctx context.Context, userID string, perm string) (bool, error) {
@@ -1437,12 +1437,12 @@ func (s *Service) RoleAssignmentsForRoleID(ctx context.Context, roleID string) (
 
 // AssignRole assigns a role to a principal.
 func (s *Service) AssignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
-	return s.permissions.AssignRole(ctx, principal, roleID, bindingValues)
+	return s.permissions.AssignRole(ctx, principal, roleID, s.builtIns.Roles(), bindingValues)
 }
 
 // UnassignRole unassigns a role from a principal.
 func (s *Service) UnassignRole(ctx context.Context, principal PrincipalRef, roleID string, bindingValues map[string]any) error {
-	return s.permissions.UnassignRole(ctx, principal, roleID, bindingValues)
+	return s.permissions.UnassignRole(ctx, principal, roleID, s.builtIns.Roles(), bindingValues)
 }
 
 // GrantsForPrincipal retrieves active grants for the specified principal.

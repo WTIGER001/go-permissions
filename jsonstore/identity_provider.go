@@ -6,13 +6,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/wtiger001/go-permissions"
 )
 
+type TeamMembershipPrincipalKind string
+
+var UserMemberKind TeamMembershipPrincipalKind = "user"
+var GroupMemberKind TeamMembershipPrincipalKind = "group"
+
+type Entry struct {
+	ID   string
+	Kind TeamMembershipPrincipalKind
+}
+
 type IdentityData struct {
-	UserGroups map[string][]string `json:"user_groups"`
+	UserGroups     map[string][]string `json:"user_groups"`
+	TeamMembership map[string][]Entry  `json:"team_membership"`
 }
 
 type IdentityProvider struct {
@@ -132,6 +144,41 @@ func (p *IdentityProvider) IsUserInGroup(_ context.Context, userID, groupID stri
 	}
 
 	return false, nil
+}
+
+func (p *IdentityProvider) GetUserTeams(c context.Context, userID string) ([]string, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	teams := make([]string, 0)
+
+	for teamID, entries := range p.data.TeamMembership {
+		for _, entry := range entries {
+			if entry.ID == userID && entry.Kind == UserMemberKind {
+				teams = append(teams, teamID)
+				continue
+			} else if entry.Kind == GroupMemberKind {
+				inGroup, _ := p.IsUserInGroup(c, userID, entry.ID)
+				if inGroup {
+					teams = append(teams, teamID)
+					continue
+				}
+			}
+		}
+	}
+
+	return append([]string(nil), teams...), nil
+}
+
+func (p *IdentityProvider) IsUserInTeam(c context.Context, userID, teamID string) (bool, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	teams, err := p.GetUserTeams(c, userID)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(teams, teamID), nil
 }
 
 func emptyIdentityData() IdentityData {

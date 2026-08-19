@@ -4,8 +4,10 @@ import "context"
 
 type IdentityProvider interface {
 	GetUserGroups(ctx context.Context, userID string) ([]string, error)
+	GetUserTeams(ctx context.Context, userID string) ([]string, error)
 	GetGroupMembers(ctx context.Context, groupID string) ([]string, error)
 	IsUserInGroup(ctx context.Context, userID, groupID string) (bool, error)
+	IsUserInTeam(ctx context.Context, userID, teamID string) (bool, error)
 }
 
 type PermissionStore interface {

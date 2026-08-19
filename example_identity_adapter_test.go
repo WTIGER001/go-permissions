@@ -3,10 +3,22 @@ package permissions
 import (
 	"context"
 	"fmt"
+	"slices"
 )
+
+type TeamMembershipPrincipalKind string
+
+var UserMemberKind TeamMembershipPrincipalKind = "user"
+var GroupMemberKind TeamMembershipPrincipalKind = "group"
+
+type Entry struct {
+	ID   string
+	Kind TeamMembershipPrincipalKind
+}
 
 type exampleIdentityAdapter struct {
 	groupMembership map[string]map[string]bool
+	teamMembership  map[string][]Entry
 }
 
 func (a exampleIdentityAdapter) GetUserGroups(_ context.Context, userID string) ([]string, error) {
@@ -36,12 +48,41 @@ func (a exampleIdentityAdapter) GetGroupMembers(_ context.Context, groupID strin
 	return users, nil
 }
 
+func (a exampleIdentityAdapter) GetUserTeams(c context.Context, userID string) ([]string, error) {
+	teams := make([]string, 0)
+
+	for teamID, entries := range a.teamMembership {
+		for _, entry := range entries {
+			if entry.ID == userID && entry.Kind == UserMemberKind {
+				teams = append(teams, teamID)
+				continue
+			} else if entry.Kind == GroupMemberKind {
+				inGroup, _ := a.IsUserInGroup(c, userID, entry.ID)
+				if inGroup {
+					teams = append(teams, teamID)
+					continue
+				}
+			}
+		}
+	}
+
+	return teams, nil
+}
+
 func (a exampleIdentityAdapter) IsUserInGroup(_ context.Context, userID, groupID string) (bool, error) {
 	groups, ok := a.groupMembership[userID]
 	if !ok {
 		return false, nil
 	}
 	return groups[groupID], nil
+}
+
+func (a exampleIdentityAdapter) IsUserInTeam(c context.Context, userID, teamID string) (bool, error) {
+	teams, err := a.GetUserTeams(c, userID)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(teams, teamID), nil
 }
 
 type examplePolicyStore struct{}
@@ -126,15 +167,24 @@ func (e examplePolicyStore) ListGrants(ctx context.Context, query GrantQuery) (G
 }
 
 func ExampleNewServiceWithIdentity_customIdentityAdapter() {
+	teamID := "42"
+
 	identity := exampleIdentityAdapter{
 		groupMembership: map[string]map[string]bool{
 			"u-123": {"g-finops": true},
+		},
+		teamMembership: map[string][]Entry{
+			teamID: {
+				{
+					ID:   "g-finops",
+					Kind: GroupMemberKind,
+				},
+			},
 		},
 	}
 	policy := examplePolicyStore{}
 
 	svc := NewServiceWithIdentity(identity, policy)
-	teamID := "42"
 
 	ok, err := svc.HasPermission(context.Background(), Request{
 		UserID: "u-123",

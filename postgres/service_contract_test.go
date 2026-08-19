@@ -37,7 +37,7 @@ func newContractStore(t *testing.T) *postgresHarnessStore {
 	return &postgresHarnessStore{Store: store}
 }
 
-// ensureIdentityTables creates user/group tables needed by the harness identity provider.
+// ensureIdentityTables creates user/group/team tables needed by the harness identity provider.
 // These are test-only and not managed by the production EnsureSchema.
 func ensureIdentityTables(ctx context.Context, pool *pgxpool.Pool) error {
 	stmts := []string{
@@ -59,6 +59,16 @@ func ensureIdentityTables(ctx context.Context, pool *pgxpool.Pool) error {
 			descendant_group_id text not null references groups(id) on delete cascade,
 			depth int not null,
 			primary key (ancestor_group_id, descendant_group_id)
+		);`,
+		`create table if not exists teams (
+			id text primary key,
+			name text not null
+		);`,
+		`create table if not exists team_members (
+			team_id text not null references teams(id) on delete cascade,
+			principal_kind text not null check (principal_kind in ('user','group')),
+			principal_id text not null,
+			primary key (team_id, principal_kind, principal_id)
 		);`,
 	}
 	for _, stmt := range stmts {
@@ -84,6 +94,8 @@ func (s *postgresHarnessStore) Reset(ctx context.Context, t *testing.T) {
 	stmt := `truncate table
 		group_members,
 		group_closure,
+		team_members,
+		teams,
 		role_inheritance,
 		role_closure,
 		principal_roles,
@@ -144,6 +156,34 @@ where gc.ancestor_group_id = $1
 	return ids, rows.Err()
 }
 
+func (s *postgresHarnessStore) GetUserTeams(ctx context.Context, userID string) ([]string, error) {
+	const query = `
+select distinct tm.team_id
+from team_members tm
+where (tm.principal_kind = 'user' and tm.principal_id = $1)
+   or (tm.principal_kind = 'group' and tm.principal_id in (
+        select gc.ancestor_group_id
+        from group_members gm
+	join group_closure gc on gc.descendant_group_id = gm.group_id
+        where gm.user_id = $1
+   ))
+`
+	rows, err := s.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (s *postgresHarnessStore) IsUserInGroup(ctx context.Context, userID, groupID string) (bool, error) {
 	const query = `
 select exists (
@@ -154,6 +194,31 @@ select exists (
 `
 	var exists bool
 	err := s.pool.QueryRow(ctx, query, userID, groupID).Scan(&exists)
+	return exists, err
+}
+
+func (s *postgresHarnessStore) IsUserInTeam(ctx context.Context, userID, teamID string) (bool, error) {
+	const query = `
+select exists (
+	select 1
+	from team_members tm
+	where tm.team_id = $2
+	  and (
+	    (tm.principal_kind = 'user' and tm.principal_id = $1)
+	    or (
+	      tm.principal_kind = 'group'
+	      and tm.principal_id in (
+	        select gc.ancestor_group_id
+	        from group_members gm
+	        join group_closure gc on gc.descendant_group_id = gm.group_id
+	        where gm.user_id = $1
+	      )
+	    )
+	  )
+)
+`
+	var exists bool
+	err := s.pool.QueryRow(ctx, query, userID, teamID).Scan(&exists)
 	return exists, err
 }
 
@@ -216,6 +281,8 @@ func seedDenyOverridesAllowScenario(t *testing.T, ctx context.Context, pool *pgx
 		"insert into groups (id, name) values ('g-1', 'Group One')",
 		"insert into group_members (group_id, user_id) values ('g-1', 'u-1')",
 		"insert into group_closure (ancestor_group_id, descendant_group_id, depth) values ('g-1', 'g-1', 0)",
+		"insert into teams (id, name) values ('42', 'Billing Team')",
+		"insert into team_members (team_id, principal_kind, principal_id) values ('42', 'user', 'u-1')",
 		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('user', 'u-1', 'allow', '42', null, 'billing.read', '{}'::jsonb)",
 		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('group', 'g-1', 'deny', '42', '*', 'billing.read', '{}'::jsonb)",
 	}
@@ -227,6 +294,8 @@ func seedStrictBindingScenario(t *testing.T, ctx context.Context, pool *pgxpool.
 
 	stmts := []string{
 		"insert into users (id, display_name) values ('u-1', 'User One')",
+		"insert into teams (id, name) values ('42', 'Billing Team')",
+		"insert into team_members (team_id, principal_kind, principal_id) values ('42', 'user', 'u-1')",
 		"insert into roles (id, code) values ('r-parent', 'parent')",
 		"insert into roles (id, code) values ('r-child', 'child')",
 		"insert into role_closure (ancestor_role_id, descendant_role_id, depth) values ('r-parent', 'r-parent', 0)",
@@ -243,6 +312,8 @@ func seedEffectivePermissionsScenario(t *testing.T, ctx context.Context, pool *p
 
 	stmts := []string{
 		"insert into users (id, display_name) values ('u-1', 'User One')",
+		"insert into teams (id, name) values ('7', 'Reporting Team')",
+		"insert into team_members (team_id, principal_kind, principal_id) values ('7', 'user', 'u-1')",
 		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('user', 'u-1', 'allow', '7', null, 'report.read', '{}'::jsonb)",
 		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('user', 'u-1', 'deny', '7', null, 'report.read', '{}'::jsonb)",
 		"insert into permission_grants (owner_kind, owner_id, effect, team_scope, object_scope, permission_name, variable_spec) values ('user', 'u-1', 'allow', '7', null, 'report.write', '{}'::jsonb)",

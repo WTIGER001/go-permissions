@@ -3,7 +3,7 @@ package examples
 import (
 	"context"
 	"reflect"
-		"testing"
+	"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -30,6 +30,19 @@ func TestFieldScopedSensitiveObject(t *testing.T) {
 
 	readPerm := permissions.NewObjectPermission("customer.read", "Customer", "Read Customer", "Allows reading customer profile fields.").WithChecker(svc)
 	writePerm := permissions.NewObjectPermission("customer.write", "Customer", "Write Customer", "Allows writing customer profile fields.").WithChecker(svc)
+
+	identity.TeamMembership = map[string][]inmemory.Entry{
+		teamID: {
+			{
+				ID:   "user-full",
+				Kind: inmemory.UserMemberKind,
+			},
+			{
+				ID:   "user-basic",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+	}
 
 	store.AddGrants(
 		permissions.Grant{

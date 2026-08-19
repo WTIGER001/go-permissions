@@ -3,7 +3,7 @@ package examples
 import (
 	"context"
 	"sort"
-		"testing"
+	"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -21,6 +21,26 @@ func TestMultiTenantInheritance(t *testing.T) {
 
 	team1001 := "1001"
 	team2002 := "2002"
+
+	identity.TeamMembership = map[string][]inmemory.Entry{
+		team1001: {
+			{
+				ID:   "anna",
+				Kind: inmemory.UserMemberKind,
+			},
+			{
+				ID:   "chris",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+		team2002: {
+			{
+				ID:   "ben",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+	}
+
 	store.AddGrants(
 		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.team_analyst_1001", Effect: permissions.EffectAllow, TeamScope: team1001, PermissionName: viewPerm.ID()},
 		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.team_analyst_2002", Effect: permissions.EffectAllow, TeamScope: team2002, PermissionName: viewPerm.ID()},

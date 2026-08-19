@@ -11,6 +11,7 @@ import (
 
 type mockStore struct {
 	groupIDs        []string
+	teamIDs         []string
 	userID          string
 	roleAssignments []RoleAssignment
 	expandedRoleIDs []string
@@ -31,6 +32,10 @@ var _ PermissionStore = (*mockStore)(nil)
 
 func (m *mockStore) GetUserGroups(_ context.Context, _ string) ([]string, error) {
 	return append([]string(nil), m.groupIDs...), m.identityErr
+}
+
+func (m *mockStore) GetUserTeams(_ context.Context, _ string) ([]string, error) {
+	return append([]string(nil), m.teamIDs...), m.identityErr
 }
 
 func (m *mockStore) GetGroupMembers(_ context.Context, groupID string) ([]string, error) {
@@ -149,6 +154,18 @@ func (m *mockStore) IsUserInGroup(_ context.Context, userID, groupID string) (bo
 	}
 	for _, g := range m.groupIDs {
 		if g == groupID {
+			return true, m.identityErr
+		}
+	}
+	return false, m.identityErr
+}
+
+func (m *mockStore) IsUserInTeam(_ context.Context, userID, teamID string) (bool, error) {
+	if m.userID != "" && userID != m.userID {
+		return false, m.identityErr
+	}
+	for _, t := range m.teamIDs {
+		if t == teamID {
 			return true, m.identityErr
 		}
 	}
@@ -290,6 +307,7 @@ func TestHasPermission_DenyOverridesAllow(t *testing.T) {
 	teamID := "42"
 	store := &mockStore{
 		groupIDs: []string{"g-1"},
+		teamIDs:  []string{teamID},
 		grants: []Grant{
 			{
 				OwnerKind:      PrincipalUser,
@@ -327,6 +345,7 @@ func TestHasPermission_StrictMissingBindingReturnsError(t *testing.T) {
 	store := &mockStore{
 		roleAssignments: []RoleAssignment{{RoleID: "r-1"}},
 		expandedRoleIDs: []string{"r-1"},
+		teamIDs:         []string{teamID},
 		grants: []Grant{
 			{
 				OwnerKind:      PrincipalRole,
@@ -358,6 +377,7 @@ func TestEffectivePermissions_DenyRemovesAllow(t *testing.T) {
 		roleAssignments: []RoleAssignment{
 			{RoleID: "r-9"},
 		},
+		teamIDs: []string{teamID},
 		grants: []Grant{
 			{
 				OwnerKind:      PrincipalUser,
@@ -562,6 +582,7 @@ func TestHasPermission_EmptyUserIDSkipsIdentityLookups(t *testing.T) {
 func TestHasFieldPermission_AllowAllWhenRestrictedFieldsEmpty(t *testing.T) {
 	teamID := "42"
 	store := &mockStore{
+		teamIDs: []string{teamID},
 		grants: []Grant{{
 			OwnerKind:      PrincipalUser,
 			OwnerID:        "u-1",
@@ -584,6 +605,7 @@ func TestHasFieldPermission_AllowAllWhenRestrictedFieldsEmpty(t *testing.T) {
 func TestHasFieldPermission_RestrictedAllowAndScopedDeny(t *testing.T) {
 	teamID := "42"
 	store := &mockStore{
+		teamIDs: []string{teamID},
 		grants: []Grant{
 			{
 				OwnerKind:      PrincipalUser,
@@ -644,6 +666,7 @@ func TestHasFieldPermission_RejectsIndexedPath(t *testing.T) {
 func TestFilterPermittedFields_ReturnsAllowedSubset(t *testing.T) {
 	teamID := "42"
 	store := &mockStore{
+		teamIDs: []string{teamID},
 		grants: []Grant{
 			{
 				OwnerKind:        PrincipalUser,
@@ -707,7 +730,7 @@ func TestHasPermission_SyntheticAuthenticatedRoleIncluded(t *testing.T) {
 }
 
 func TestHasPermission_SyntheticAdminRoleIncludedWhenInAdminGroup(t *testing.T) {
-	store := &mockStore{groupIDs: []string{"g-admin"}}
+	store := &mockStore{groupIDs: []string{"g-admin"}, teamIDs: []string{"team-a"}}
 	svc := NewServiceWithProviders(store, store)
 	svc.SetAdminRoleID(SyntheticRoleAdmin)
 	svc.SetAdminGroupID("g-admin")
@@ -723,7 +746,7 @@ func TestHasPermission_SyntheticAdminRoleIncludedWhenInAdminGroup(t *testing.T) 
 }
 
 func TestHasPermission_SyntheticAdminRoleNotIncludedWithoutAdminGroupMatch(t *testing.T) {
-	store := &mockStore{groupIDs: []string{"g-users"}}
+	store := &mockStore{groupIDs: []string{"g-users"}, teamIDs: []string{"team-a"}}
 	svc := NewServiceWithProviders(store, store)
 	svc.SetAdminRoleID(SyntheticRoleAdmin)
 	svc.SetAdminGroupID("g-admin")
@@ -1059,6 +1082,7 @@ func TestHasPermission_MultiTenantRole_BothTeamsAllowed(t *testing.T) {
 	team99 := "99"
 
 	store := &mockStore{
+		teamIDs: []string{team42, team99},
 		roleAssignments: []RoleAssignment{
 			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 42}},
 			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 99}},
@@ -1107,6 +1131,7 @@ func TestHasPermission_MultiTenantRole_DenyInOneTeam(t *testing.T) {
 	team99 := "99"
 
 	store := &mockStore{
+		teamIDs: []string{team42},
 		roleAssignments: []RoleAssignment{
 			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 42}},
 			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 99}},
@@ -1161,6 +1186,7 @@ func TestEffectivePermissions_MultiTenantRole(t *testing.T) {
 	team42 := "42"
 
 	store := &mockStore{
+		teamIDs: []string{team42},
 		roleAssignments: []RoleAssignment{
 			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 42}},
 			{RoleID: "r-viewer", BindingValues: map[string]any{"team": 99}},

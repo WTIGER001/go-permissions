@@ -357,6 +357,17 @@ func (s *Service) evaluatePermission(ctx context.Context, req Request, fieldPath
 
 	now := time.Now().UTC()
 
+	// Disallow if request has a team scope specified and user is not in team
+	if req.TeamID != "" && req.TeamID != "*" {
+		inTeam, err := s.identity.IsUserInTeam(ctx, req.UserID, req.TeamID)
+		if err != nil {
+			return false, err
+		}
+		if !inTeam {
+			return false, nil
+		}
+	}
+
 	groupIDs, err := s.resolveUserGroupIDs(ctx, req.UserID)
 	if err != nil {
 		return false, err
@@ -367,7 +378,7 @@ func (s *Service) evaluatePermission(ctx context.Context, req Request, fieldPath
 		return false, err
 	}
 
-	// Phase 1: evaluate grants for the user and their groups (no binding resolution needed).
+	// Phase 1: evaluate grants for the user and their groups and teams (no binding resolution needed).
 	unboundOwners := make([]PrincipalRef, 0, 1+len(groupIDs))
 	if req.UserID != "" {
 		unboundOwners = append(unboundOwners, PrincipalRef{Kind: PrincipalUser, ID: req.UserID})
@@ -382,6 +393,7 @@ func (s *Service) evaluatePermission(ctx context.Context, req Request, fieldPath
 		if err != nil {
 			return false, err
 		}
+
 		for _, grant := range unboundGrants {
 			if grant.IsExpiredAt(now) {
 				continue
@@ -389,6 +401,7 @@ func (s *Service) evaluatePermission(ctx context.Context, req Request, fieldPath
 			if !grantMatchesRequest(grant, req) || !grantMatchesFieldPath(grant, fieldPath) {
 				continue
 			}
+
 			if grant.Effect == EffectDeny {
 				if fieldPath == nil && len(grant.RestrictedFields) > 0 {
 					continue
@@ -593,6 +606,16 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 		if !matchesTeamScope(resolvedGrant, teamID) {
 			return
 		}
+		if teamID != "" && teamID != "*" {
+			inTeam, err := s.identity.IsUserInTeam(ctx, userID, teamID)
+			if err != nil {
+				return
+			}
+			if !inTeam {
+				return
+			}
+		}
+
 		key := permissionKey(resolvedGrant)
 		if resolvedGrant.Effect == EffectDeny {
 			denied[key] = true

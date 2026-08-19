@@ -2,7 +2,7 @@ package examples
 
 import (
 	"context"
-		"testing"
+	"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -19,6 +19,23 @@ func TestFinanceReadVsExport(t *testing.T) {
 	exportPerm := permissions.NewTeamPermission("finops.export", "FinOps", "Export FinOps", "Allows exporting FinOps data for a team.").WithChecker(svc)
 	teamID := "900"
 	teamScope := teamID
+
+	identity.TeamMembership = map[string][]inmemory.Entry{
+		teamID: {
+			{
+				ID:   "analyst",
+				Kind: inmemory.UserMemberKind,
+			},
+			{
+				ID:   "manager",
+				Kind: inmemory.UserMemberKind,
+			},
+			{
+				ID:   "intern",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+	}
 
 	store.AddGrants(
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "analyst", Effect: permissions.EffectAllow, TeamScope: teamScope, PermissionName: readPerm.ID()},

@@ -2,7 +2,7 @@ package examples
 
 import (
 	"context"
-		"testing"
+	"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -14,6 +14,21 @@ func TestCrossTeamContractor(t *testing.T) {
 	store := inmemory.NewStore()
 	identity := inmemory.NewIdentityProvider()
 	svc := permissions.NewService(store, identity)
+
+	identity.TeamMembership = map[string][]inmemory.Entry{
+		"11": {
+			{
+				ID:   "contractor-1",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+		"33": {
+			{
+				ID:   "contractor-1",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+	}
 
 	perm := permissions.NewTeamPermission("tasks.view", "Tasks", "View Tasks", "Allows viewing tasks for a team.").WithChecker(svc)
 

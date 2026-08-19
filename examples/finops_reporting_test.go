@@ -3,7 +3,7 @@ package examples
 import (
 	"context"
 	"sort"
-		"testing"
+	"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -15,6 +15,21 @@ func TestFinopsReporting(t *testing.T) {
 	store := inmemory.NewStore()
 	identity := inmemory.NewIdentityProvider()
 	svc := permissions.NewService(store, identity)
+
+	identity.TeamMembership = map[string][]inmemory.Entry{
+		"101": {
+			{
+				ID:   "bob",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+		"202": {
+			{
+				ID:   "carol",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+	}
 
 	systemPerm := permissions.NewSystemPermission("finops.system.report.view", "FinOps", "View System Cost Report", "Allows viewing system-wide cost reporting.").WithChecker(svc)
 	teamPerm := permissions.NewTeamPermission("finops.team.report.view", "FinOps", "View Team Cost Report", "Allows viewing team-level cost reporting.").WithChecker(svc)

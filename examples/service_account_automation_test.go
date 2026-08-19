@@ -2,7 +2,7 @@ package examples
 
 import (
 	"context"
-		"testing"
+	"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -20,6 +20,16 @@ func TestServiceAccountAutomation(t *testing.T) {
 
 	team77 := "77"
 	teamScope := team77
+
+	identity.TeamMembership = map[string][]inmemory.Entry{
+		team77: {
+			{
+				ID:   "svc-billing-sync",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+	}
+
 	store.AddGrants(
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "svc-billing-sync", Effect: permissions.EffectAllow, TeamScope: teamScope, PermissionName: runPerm.ID()},
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "svc-billing-sync", Effect: permissions.EffectAllow, TeamScope: teamScope, PermissionName: readPerm.ID()},

@@ -2,7 +2,7 @@ package examples
 
 import (
 	"context"
-		"testing"
+	"testing"
 
 	permissions "github.com/wtiger001/go-permissions"
 	"github.com/wtiger001/go-permissions/inmemory"
@@ -19,6 +19,15 @@ func TestPermissionMigrationStory(t *testing.T) {
 	teamScope := teamID
 	oldPerm := permissions.NewTeamPermission("reports.read", "Reports", "Read Reports", "Allows reading reports.").WithChecker(svc)
 	newPerm := permissions.NewTeamPermission("reports.view", "Reports", "View Reports", "Allows viewing reports.").WithChecker(svc)
+
+	identity.TeamMembership = map[string][]inmemory.Entry{
+		teamID: {
+			{
+				ID:   "legacy-user",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+	}
 
 	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "legacy-user", Effect: permissions.EffectAllow, TeamScope: teamScope, PermissionName: oldPerm.ID()})
 

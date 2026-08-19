@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 type Data struct {
 	UserGroups           map[string][]string                     `json:"user_groups"`
+	TeamMembership       map[string][]Entry                      `json:"team_membership"`
 	UserRoleAssignments  map[string][]permissions.RoleAssignment `json:"user_role_assignments"`
 	GroupRoleAssignments map[string][]permissions.RoleAssignment `json:"group_role_assignments"`
 	// RoleInheritance stores the direct parent->children edges for persistence.
@@ -281,6 +283,41 @@ func (s *Store) GetGroupMembers(_ context.Context, groupID string) ([]string, er
 	}
 
 	return members, nil
+}
+
+func (p *Store) GetUserTeams(c context.Context, userID string) ([]string, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	teams := make([]string, 0)
+
+	for teamID, entries := range p.data.TeamMembership {
+		for _, entry := range entries {
+			if entry.ID == userID && entry.Kind == UserMemberKind {
+				teams = append(teams, teamID)
+				continue
+			} else if entry.Kind == GroupMemberKind {
+				inGroup, _ := p.IsUserInGroup(c, userID, entry.ID)
+				if inGroup {
+					teams = append(teams, teamID)
+					continue
+				}
+			}
+		}
+	}
+
+	return append([]string(nil), teams...), nil
+}
+
+func (p *Store) IsUserInTeam(c context.Context, userID, teamID string) (bool, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	teams, err := p.GetUserTeams(c, userID)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(teams, teamID), nil
 }
 
 func (s *Store) ListRoleAssignmentsForUserAndGroups(_ context.Context, userID string, groupIDs []string) ([]permissions.RoleAssignment, error) {

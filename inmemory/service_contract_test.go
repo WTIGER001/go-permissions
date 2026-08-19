@@ -29,6 +29,7 @@ func (s *harnessStore) Reset(_ context.Context, _ *testing.T) {
 	s.roleInheritance = map[string]map[string]bool{}
 	s.roleClosure = map[string]map[string]bool{}
 	s.grants = []permissions.Grant{}
+	s.teamMembership = map[string][]Entry{}
 	s.IdentityProvider.userGroups = map[string][]string{}
 }
 
@@ -45,6 +46,14 @@ func (s *harnessStore) SeedDenyOverridesAllow(_ context.Context, _ *testing.T) p
 
 func (s *harnessStore) SeedStrictBindingError(_ context.Context, _ *testing.T) permissions.Request {
 	s.AddUserRoleAssignments("u-1", permissions.RoleAssignment{RoleID: "r-parent", BindingValues: map[string]any{"team": 42}})
+	s.teamMembership = map[string][]Entry{
+		"42": {
+			Entry{
+				ID:   "u-1",
+				Kind: UserMemberKind,
+			},
+		},
+	}
 	s.SetRoleExpansion("r-parent", "r-child")
 	s.AddGrants(permissions.Grant{
 		OwnerKind:      permissions.PrincipalRole,
@@ -65,6 +74,15 @@ func (s *harnessStore) SeedEffectivePermissions(_ context.Context, _ *testing.T)
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "u-1", Effect: permissions.EffectDeny, TeamScope: "7", PermissionName: "report.read"},
 		permissions.Grant{OwnerKind: permissions.PrincipalUser, OwnerID: "u-1", Effect: permissions.EffectAllow, TeamScope: "7", PermissionName: "report.write"},
 	)
+
+	s.teamMembership = map[string][]Entry{
+		"7": {
+			{
+				ID:   "u-1",
+				Kind: UserMemberKind,
+			},
+		},
+	}
 
 	teamID := "7"
 	return testingharness.EffectiveExpectation{

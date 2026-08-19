@@ -18,6 +18,15 @@ func TestTenantOnboardingKit(t *testing.T) {
 	viewPerm := permissions.NewTeamPermission("projects.view", "Projects", "View Projects", "Allows viewing projects for a team.").WithChecker(svc)
 	createPerm := permissions.NewTeamPermission("projects.create", "Projects", "Create Projects", "Allows creating projects for a team.").WithChecker(svc)
 
+	identity.TeamMembership = map[string][]inmemory.Entry{
+		"555": {
+			{
+				ID:   "tenant-admin",
+				Kind: inmemory.UserMemberKind,
+			},
+		},
+	}
+
 	store.AddGrants(
 		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.tenant_starter", Effect: permissions.EffectAllow, TeamScope: "555", PermissionName: "projects.view"},
 		permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.tenant_starter", Effect: permissions.EffectAllow, TeamScope: "555", PermissionName: "projects.create"},

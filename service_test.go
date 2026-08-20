@@ -1311,7 +1311,7 @@ func TestService_AddBuiltInRole(t *testing.T) {
 	}
 
 	// 1. First Boot: Should create the role with BuiltIn = true and register grants
-	err := svc.AddBuiltInRole(context.Background(), role)
+	err := svc.AddBuiltInRole(context.Background(), role, false)
 	if err != nil {
 		t.Fatalf("expected no error during first bootstrap, got %v", err)
 	}
@@ -1336,7 +1336,7 @@ func TestService_AddBuiltInRole(t *testing.T) {
 	role.Description = "Updated description"
 	role.Permissions = append(role.Permissions, "backup.download")
 
-	err = svc.AddBuiltInRole(context.Background(), role)
+	err = svc.AddBuiltInRole(context.Background(), role, false)
 	if err != nil {
 		t.Fatalf("expected no error during second bootstrap, got %v", err)
 	}
@@ -1372,7 +1372,7 @@ func TestService_ProxyMethods(t *testing.T) {
 		Name:        "Editor",
 		Permissions: []string{"write", "read"},
 	}
-	if err := svc.AddBuiltInRole(ctx, builtInRole); err != nil {
+	if err := svc.AddBuiltInRole(ctx, builtInRole, false); err != nil {
 		t.Fatalf("AddBuiltInRole failed: %v", err)
 	}
 
@@ -1541,7 +1541,7 @@ func TestRoleDefinitionsByScopeAndTag(t *testing.T) {
 		Name:  "System Operator",
 		Scope: RoleScopeSystem,
 		Tags:  []string{"system", "ops"},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("AddBuiltInRole failed: %v", err)
 	}

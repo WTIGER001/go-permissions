@@ -1394,7 +1394,7 @@ func (s *Service) ensureRoleExists(_ context.Context, role Role) error {
 }
 
 // AddBuiltInRole idempotently registers a system-managed (built-in) role definition and seeds its default permissions in memory.
-func (s *Service) AddBuiltInRole(_ context.Context, role Role, skipPermissionGrant bool) error {
+func (s *Service) AddBuiltInRole(_ context.Context, role Role) error {
 	if role.ID == "" {
 		return fmt.Errorf("role ID is required")
 	}
@@ -1410,18 +1410,16 @@ func (s *Service) AddBuiltInRole(_ context.Context, role Role, skipPermissionGra
 		return fmt.Errorf("failed to register built-in role %s: %w", role.ID, err)
 	}
 
-	if !skipPermissionGrant {
-		for _, perm := range role.Permissions {
-			grant := Grant{
-				OwnerKind:      PrincipalRole,
-				OwnerID:        role.ID,
-				Effect:         EffectAllow,
-				TeamScope:      "*",
-				PermissionName: perm,
-			}
-			if err := s.builtIns.AddGrant(grant); err != nil {
-				return fmt.Errorf("failed to seed grant for built-in role %s: %w", role.ID, err)
-			}
+	for _, perm := range role.Permissions {
+		grant := Grant{
+			OwnerKind:      PrincipalRole,
+			OwnerID:        role.ID,
+			Effect:         EffectAllow,
+			TeamScope:      "*",
+			PermissionName: perm,
+		}
+		if err := s.builtIns.AddGrant(grant); err != nil {
+			return fmt.Errorf("failed to seed grant for built-in role %s: %w", role.ID, err)
 		}
 	}
 

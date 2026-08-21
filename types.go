@@ -117,7 +117,6 @@ type Role struct {
 	Description  string
 	Scope        RoleScope
 	Tags         []string
-	VariableSpec map[string]any
 	Permissions  []string
 	BuiltIn      bool
 	IsDisabled   bool

@@ -357,17 +357,6 @@ func (s *Service) evaluatePermission(ctx context.Context, req Request, fieldPath
 
 	now := time.Now().UTC()
 
-	// Disallow if request has a team scope specified and user is not in team
-	if req.TeamID != "" && req.TeamID != "*" {
-		inTeam, err := s.identity.IsUserInTeam(ctx, req.UserID, req.TeamID)
-		if err != nil {
-			return false, err
-		}
-		if !inTeam {
-			return false, nil
-		}
-	}
-
 	groupIDs, err := s.resolveUserGroupIDs(ctx, req.UserID)
 	if err != nil {
 		return false, err
@@ -605,15 +594,6 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 	accumulateGrant := func(resolvedGrant Grant) {
 		if !matchesTeamScope(resolvedGrant, teamID) {
 			return
-		}
-		if teamID != "" && teamID != "*" {
-			inTeam, err := s.identity.IsUserInTeam(ctx, userID, teamID)
-			if err != nil {
-				return
-			}
-			if !inTeam {
-				return
-			}
 		}
 
 		key := permissionKey(resolvedGrant)
@@ -972,8 +952,33 @@ func (s *Service) resolveRoleAssignmentsForUserAndGroups(ctx context.Context, us
 			if assignment.RoleID == "" {
 				continue
 			}
-			roleDef, err := s.permissions.RoleDefinition(ctx, assignment.RoleID)
-			if err == nil && roleDef.IsDisabled {
+			var roleDef Role
+			// First check if role is synthetic role
+			switch assignment.RoleID {
+			case s.publicRoleID, s.authenticatedRoleID, s.adminRoleID:
+				roleDef = Role{
+					ID:      assignment.RoleID,
+					BuiltIn: true,
+				}
+			default:
+				// Now check for builtin roles
+				if strings.HasPrefix(assignment.RoleID, BuiltInPrefix) {
+					match, ok := s.builtIns.roles[assignment.RoleID]
+					if !ok {
+						continue
+					}
+					roleDef = match
+				} else {
+					// Finally check for store roles
+					match, err := s.permissions.RoleDefinition(ctx, assignment.RoleID)
+					if err != nil {
+						continue
+					}
+					roleDef = match
+				}
+			}
+
+			if roleDef.IsDisabled {
 				continue
 			}
 			if assignment.BindingValues == nil {
@@ -1417,6 +1422,40 @@ func (s *Service) AddBuiltInRole(_ context.Context, role Role) error {
 			Effect:         EffectAllow,
 			TeamScope:      "*",
 			PermissionName: perm,
+		}
+		if err := s.builtIns.AddGrant(grant); err != nil {
+			return fmt.Errorf("failed to seed grant for built-in role %s: %w", role.ID, err)
+		}
+	}
+
+	return nil
+}
+
+// AddBuiltInTeamRole idempotently registers a system-managed (built-in) role definition scoped for teams and seeds its default permissions in memory.
+func (s *Service) AddBuiltInTeamRole(_ context.Context, role Role) error {
+	if role.ID == "" {
+		return fmt.Errorf("role ID is required")
+	}
+	if role.Name == "" {
+		return fmt.Errorf("role name is required")
+	}
+	if !strings.HasPrefix(role.ID, BuiltInPrefix) {
+		role.ID = BuiltInPrefix + role.ID
+	}
+
+	role.BuiltIn = true
+	if err := s.builtIns.RegisterRole(role); err != nil {
+		return fmt.Errorf("failed to register built-in role %s: %w", role.ID, err)
+	}
+
+	for _, perm := range role.Permissions {
+		grant := Grant{
+			OwnerKind:      PrincipalRole,
+			OwnerID:        role.ID,
+			Effect:         EffectAllow,
+			TeamScope:      "?team",
+			PermissionName: perm,
+			VariableSpec:   map[string]any{"team": "required"},
 		}
 		if err := s.builtIns.AddGrant(grant); err != nil {
 			return fmt.Errorf("failed to seed grant for built-in role %s: %w", role.ID, err)

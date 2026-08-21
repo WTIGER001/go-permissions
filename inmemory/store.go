@@ -380,7 +380,7 @@ func (s *Store) RoleDefinition(_ context.Context, roleID string) (permissions.Ro
 		return permissions.Role{}, fmt.Errorf("role ID is required")
 	}
 
-	return permissions.Role{ID: roleID, Name: roleID, VariableSpec: map[string]any{}, Permissions: []string{}, BuiltIn: false, IsDisabled: false}, nil
+	return permissions.Role{ID: roleID, Name: roleID, Permissions: []string{}, BuiltIn: false, IsDisabled: false}, nil
 }
 
 func (s *Store) CreateRole(_ context.Context, _ permissions.Role) error { return nil }

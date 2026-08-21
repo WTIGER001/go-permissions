@@ -524,12 +524,6 @@ func cloneRole(role Role) Role {
 	copyRole := role
 	copyRole.Tags = append([]string(nil), role.Tags...)
 	copyRole.Permissions = append([]string(nil), role.Permissions...)
-	if role.VariableSpec != nil {
-		copyRole.VariableSpec = map[string]any{}
-		for k, v := range role.VariableSpec {
-			copyRole.VariableSpec[k] = v
-		}
-	}
 	return copyRole
 }
 

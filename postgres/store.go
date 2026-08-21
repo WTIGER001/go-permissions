@@ -492,7 +492,6 @@ order by id
 			tags = []string{}
 		}
 		role.Tags = tags
-		role.VariableSpec = map[string]any{}
 		role.Permissions = []string{}
 		roles = append(roles, role)
 	}
@@ -526,7 +525,6 @@ where id = $1
 		tags = []string{}
 	}
 	role.Tags = tags
-	role.VariableSpec = map[string]any{}
 	role.Permissions = []string{}
 	return role, nil
 }

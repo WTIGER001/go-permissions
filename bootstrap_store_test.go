@@ -178,8 +178,8 @@ func TestBootstrapStore_GrantQueriesAndPrincipals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("grants for owners: %v", err)
 	}
-	if len(ownerGrants) != 3 {
-		t.Fatalf("expected 3 active billing.read grants (expired skipped), got %d", len(ownerGrants))
+	if len(ownerGrants) != 2 {
+		t.Fatalf("expected 2 active billing.read grants (expired skipped), got %d", len(ownerGrants))
 	}
 
 	if _, err := s.PrincipalsWithGrant(ctx, Request{}); err == nil {

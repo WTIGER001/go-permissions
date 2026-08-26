@@ -344,6 +344,9 @@ func (s *bootstrapStore) GrantsForOwners(_ context.Context, owners []PrincipalRe
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	team := req.TeamID
+	object := req.Object
+
 	now := time.Now().UTC()
 	grants := make([]Grant, 0, len(s.grants))
 	for _, grant := range s.grants {
@@ -356,6 +359,16 @@ func (s *bootstrapStore) GrantsForOwners(_ context.Context, owners []PrincipalRe
 		if req.Perm != "" && grant.PermissionName != req.Perm {
 			continue
 		}
+
+		if !scopeMatches(grant.TeamScope, team) {
+			continue
+		}
+
+		// Object scope check (nil means unrestricted)
+		if grant.ObjectScope != nil && !scopeMatches(*grant.ObjectScope, object) {
+			continue
+		}
+
 		grants = append(grants, cloneGrant(grant))
 	}
 	return grants, nil
@@ -685,4 +698,24 @@ func (s *bootstrapStore) ListGrants(ctx context.Context, query GrantQuery) (Gran
 	}
 
 	return result, nil
+}
+
+func scopeMatches(scope string, reqValue string) bool {
+	// "*" always matches
+	if scope == "*" {
+		return true
+	}
+
+	// "?..." matches any non-empty request value
+	if strings.HasPrefix(scope, "?") {
+		return reqValue != ""
+	}
+
+	// If request value is provided, must match exactly
+	if reqValue != "" {
+		return scope == reqValue
+	}
+
+	// No request value: only "*" or "?..." would match (handled above)
+	return false
 }

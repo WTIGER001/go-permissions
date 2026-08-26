@@ -273,7 +273,7 @@ func (s *Store) GrantsForOwners(_ context.Context, owners []permissions.Principa
 	}
 
 	team := req.TeamID
-	hasTeam := req.TeamID != ""
+	object := req.Object
 
 	result := make([]permissions.Grant, 0, len(s.grants))
 	for _, grant := range s.grants {
@@ -287,17 +287,12 @@ func (s *Store) GrantsForOwners(_ context.Context, owners []permissions.Principa
 			continue
 		}
 
-		if hasTeam {
-			if grant.TeamScope != "*" && grant.TeamScope != team {
-				continue
-			}
-		} else {
-			if grant.TeamScope != "*" {
-				continue
-			}
+		if !scopeMatches(grant.TeamScope, team) {
+			continue
 		}
 
-		if grant.ObjectScope != nil && *grant.ObjectScope != "*" && *grant.ObjectScope != req.Object {
+		// Object scope check (nil means unrestricted)
+		if grant.ObjectScope != nil && !scopeMatches(*grant.ObjectScope, object) {
 			continue
 		}
 
@@ -505,4 +500,24 @@ func (s *Store) ListGrants(ctx context.Context, query permissions.GrantQuery) (p
 	}
 
 	return result, nil
+}
+
+func scopeMatches(scope string, reqValue string) bool {
+	// "*" always matches
+	if scope == "*" {
+		return true
+	}
+
+	// "?..." matches any non-empty request value
+	if strings.HasPrefix(scope, "?") {
+		return reqValue != ""
+	}
+
+	// If request value is provided, must match exactly
+	if reqValue != "" {
+		return scope == reqValue
+	}
+
+	// No request value: only "*" or "?..." would match (handled above)
+	return false
 }

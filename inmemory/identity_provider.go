@@ -21,7 +21,7 @@ type Entry struct {
 type IdentityProvider struct {
 	mu             sync.RWMutex
 	userGroups     map[string][]string
-	teamMembership map[string][]Entry
+	TeamMembership map[string][]Entry
 }
 
 var _ permissions.IdentityProvider = (*IdentityProvider)(nil)
@@ -84,7 +84,7 @@ func (p *IdentityProvider) GetUserTeams(c context.Context, userID string) ([]str
 
 	teams := make([]string, 0)
 
-	for teamID, entries := range p.teamMembership {
+	for teamID, entries := range p.TeamMembership {
 		for _, entry := range entries {
 			if entry.ID == userID && entry.Kind == UserMemberKind {
 				teams = append(teams, teamID)

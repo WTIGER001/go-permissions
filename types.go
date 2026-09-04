@@ -82,11 +82,17 @@ func (g Grant) IsExpiredAt(now time.Time) bool {
 	return !g.IsActiveAt(now)
 }
 
+type EffectivePermissionSource struct {
+	PrincipalRef
+	Name        string
+	Description string
+}
+
 type EffectivePermission struct {
 	TeamScope        string
 	ObjectScope      *string
 	PermissionName   string
-	Source           PrincipalRef
+	Source           EffectivePermissionSource
 	Effect           Effect
 	RestrictedFields []string
 }
@@ -112,14 +118,14 @@ func (r PrincipalRef) Validate() error {
 }
 
 type Role struct {
-	ID           string
-	Name         string
-	Description  string
-	Scope        RoleScope
-	Tags         []string
-	Permissions  []string
-	BuiltIn      bool
-	IsDisabled   bool
+	ID          string
+	Name        string
+	Description string
+	Scope       RoleScope
+	Tags        []string
+	Permissions []string
+	BuiltIn     bool
+	IsDisabled  bool
 }
 
 func (r Role) Validate() error {

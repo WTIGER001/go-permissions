@@ -121,34 +121,6 @@ func (s *Service) AddDefaultGrant(roleID, permission, teamScope string) {
 	_ = s.builtIns.AddGrant(grant)
 }
 
-// AddDefaultSystemCRUDGrants adds default allow grants for all system CRUD permissions.
-func (s *Service) AddDefaultSystemCRUDGrants(roleID, teamScope string, crud SystemCRUDPermissions) {
-	s.AddDefaultGrant(roleID, crud.Create.ID(), teamScope)
-	s.AddDefaultGrant(roleID, crud.Read.ID(), teamScope)
-	s.AddDefaultGrant(roleID, crud.Update.ID(), teamScope)
-	s.AddDefaultGrant(roleID, crud.Delete.ID(), teamScope)
-	s.AddDefaultGrant(roleID, crud.Grant.ID(), teamScope)
-}
-
-// AddDefaultTeamCRUDGrants adds default allow grants for all team CRUD permissions.
-func (s *Service) AddDefaultTeamCRUDGrants(roleID, teamScope string, crud TeamCRUDPermissions) {
-	s.AddDefaultGrant(roleID, crud.Create.ID(), teamScope)
-	s.AddDefaultGrant(roleID, crud.Read.ID(), teamScope)
-	s.AddDefaultGrant(roleID, crud.Update.ID(), teamScope)
-	s.AddDefaultGrant(roleID, crud.Delete.ID(), teamScope)
-	s.AddDefaultGrant(roleID, crud.Grant.ID(), teamScope)
-}
-
-// AddDefaultCRUDGrant adds a default allow grant for a single CRUD action.
-func (s *Service) AddDefaultCRUDGrant(roleID, teamScope string, action CRUDAction, permissionID string) {
-	switch action {
-	case CRUDCreate, CRUDRead, CRUDUpdate, CRUDDelete, CRUDGrant:
-		s.AddDefaultGrant(roleID, permissionID, teamScope)
-	default:
-		panic("invalid CRUD action")
-	}
-}
-
 func (s *Service) applyDefaultSyntheticRoleIDs() {
 	if strings.TrimSpace(s.publicRoleID) == "" {
 		s.publicRoleID = SyntheticRolePublic
@@ -592,10 +564,6 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 	allowed := map[string]EffectivePermission{}
 
 	accumulateGrant := func(resolvedGrant Grant) {
-		if !matchesTeamScope(resolvedGrant, teamID) {
-			return
-		}
-
 		key := permissionKey(resolvedGrant)
 		if resolvedGrant.Effect == EffectDeny {
 			denied[key] = true
@@ -608,11 +576,25 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 		if _, exists := allowed[key]; exists {
 			return
 		}
+
+		name := ""
+		description := ""
+		if resolvedGrant.OwnerKind == PrincipalRole {
+			roleDef, err := s.RoleDefinition(ctx, resolvedGrant.OwnerID)
+			if err == nil {
+				name = roleDef.Name
+				description = roleDef.Description
+			}
+		}
 		allowed[key] = EffectivePermission{
-			TeamScope:        resolvedGrant.TeamScope,
-			ObjectScope:      resolvedGrant.ObjectScope,
-			PermissionName:   resolvedGrant.PermissionName,
-			Source:           PrincipalRef{Kind: resolvedGrant.OwnerKind, ID: resolvedGrant.OwnerID},
+			TeamScope:      resolvedGrant.TeamScope,
+			ObjectScope:    resolvedGrant.ObjectScope,
+			PermissionName: resolvedGrant.PermissionName,
+			Source: EffectivePermissionSource{
+				PrincipalRef: PrincipalRef{Kind: resolvedGrant.OwnerKind, ID: resolvedGrant.OwnerID},
+				Name:         name,
+				Description:  description,
+			},
 			Effect:           resolvedGrant.Effect,
 			RestrictedFields: append([]string(nil), resolvedGrant.RestrictedFields...),
 		}
@@ -684,30 +666,27 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 	return result, nil
 }
 
-func (s *Service) AllowedTeamsForUser(ctx context.Context, userID, perm string) (allTeams bool, teamIDs []string, err error) {
+func (s *Service) AllowedTeamsForUser(ctx context.Context, userID, perm string) (teamIDs []string, err error) {
 	if perm == "" {
-		return false, nil, fmt.Errorf("permission name is required")
+		return nil, fmt.Errorf("permission name is required")
 	}
 
 	perms, err := s.EffectivePermissions(ctx, userID, "")
 	if err != nil {
-		return false, nil, err
+		return nil, err
 	}
 
 	seen := map[string]bool{}
 	for _, p := range perms {
 		if p.PermissionName == perm {
-			if p.TeamScope == "*" {
-				return true, nil, nil
-			}
-			if !seen[p.TeamScope] {
+			if !seen[p.TeamScope] && p.Effect != EffectDeny {
 				teamIDs = append(teamIDs, p.TeamScope)
 				seen[p.TeamScope] = true
 			}
 		}
 	}
 
-	return false, teamIDs, nil
+	return teamIDs, nil
 }
 
 func (s *Service) PrincipalsWithPermission(ctx context.Context, teamID string, object, perm string) ([]PrincipalHit, error) {

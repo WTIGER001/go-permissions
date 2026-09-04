@@ -966,45 +966,6 @@ func TestAddDefaultGrant_ValidatesInputs(t *testing.T) {
 	})
 }
 
-func TestAddDefaultSystemCRUDGrants_AppendsAllPermissions(t *testing.T) {
-	svc := New()
-	crud := NewSystemCRUDPermissions("announcements.announcement")
-
-	svc.AddDefaultSystemCRUDGrants(SyntheticRoleAdmin, "*", crud)
-
-	if len(svc.builtIns.grants) != 5 {
-		t.Fatalf("expected 5 built-in grants, got %d", len(svc.builtIns.grants))
-	}
-}
-
-func TestAddDefaultTeamCRUDGrants_AppendsAllPermissions(t *testing.T) {
-	svc := New()
-	crud := NewTeamCRUDPermissions("announcements.teamannouncement")
-
-	svc.AddDefaultTeamCRUDGrants(SyntheticRoleAdmin, "*", crud)
-
-	if len(svc.builtIns.grants) != 5 {
-		t.Fatalf("expected 5 built-in grants, got %d", len(svc.builtIns.grants))
-	}
-}
-
-func TestAddDefaultCRUDGrant_ValidatesAction(t *testing.T) {
-	svc := New()
-
-	svc.AddDefaultCRUDGrant(SyntheticRoleAdmin, "*", CRUDRead, "announcements.read")
-	if len(svc.builtIns.grants) != 1 {
-		t.Fatalf("expected 1 built-in grant, got %d", len(svc.builtIns.grants))
-	}
-
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("expected panic for invalid CRUD action")
-		}
-	}()
-
-	svc.AddDefaultCRUDGrant(SyntheticRoleAdmin, "*", CRUDAction("invalid"), "announcements.invalid")
-}
-
 func TestCreateGrants_UsesBulkStoreWhenAvailable(t *testing.T) {
 	store := &mockStore{}
 	svc := NewServiceWithProviders(store, store)

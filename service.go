@@ -654,6 +654,9 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 			if err != nil {
 				return nil, err
 			}
+			if !matchesTeamScope(resolvedGrant, teamID) {
+				continue
+			}
 			accumulateGrant(resolvedGrant)
 		}
 	}

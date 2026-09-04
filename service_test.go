@@ -418,7 +418,7 @@ func TestEffectivePermissions_DenyRemovesAllow(t *testing.T) {
 		t.Fatalf("expected report.write, got %q", got.PermissionName)
 	}
 
-	if !reflect.DeepEqual(got.Source, PrincipalRef{Kind: PrincipalUser, ID: "u-1"}) {
+	if !reflect.DeepEqual(got.Source, EffectivePermissionSource{PrincipalRef: PrincipalRef{Kind: PrincipalUser, ID: "u-1"}, Name: "", Description: ""}) {
 		t.Fatalf("unexpected source %+v", got.Source)
 	}
 }

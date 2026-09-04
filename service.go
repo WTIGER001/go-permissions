@@ -543,6 +543,8 @@ func (s *Service) expandRolesCached(ctx context.Context, rootRoleID string, cach
 	return filtered, nil
 }
 
+// EffectivePermissions gets all effective permssion for a user.
+// If teamID "*" is supplied, permissions granted with a team scope will be included as well.
 func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamID string) ([]EffectivePermission, error) {
 	if userID == "" {
 		return nil, fmt.Errorf("user ID is required")
@@ -654,7 +656,7 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 			if err != nil {
 				return nil, err
 			}
-			if !matchesTeamScope(resolvedGrant, teamID) {
+			if teamID != "*" && !matchesTeamScope(resolvedGrant, teamID) {
 				continue
 			}
 			accumulateGrant(resolvedGrant)

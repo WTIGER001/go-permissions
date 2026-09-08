@@ -676,7 +676,7 @@ func (s *Service) AllowedTeamsForUser(ctx context.Context, userID, perm string) 
 		return nil, fmt.Errorf("permission name is required")
 	}
 
-	perms, err := s.EffectivePermissions(ctx, userID, "")
+	perms, err := s.EffectivePermissions(ctx, userID, "*")
 	if err != nil {
 		return nil, err
 	}

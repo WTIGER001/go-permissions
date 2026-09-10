@@ -521,7 +521,8 @@ where id = $1
 	var role permissions.Role
 	var scope string
 	var tags []string
-	if err := s.pool.QueryRow(ctx, query, roleID).Scan(&role.ID, &role.Name, &role.Description, &role.BuiltIn, &role.IsDisabled, &scope, &tags, &role.Permissions); err != nil {
+	var perms []string
+	if err := s.pool.QueryRow(ctx, query, roleID).Scan(&role.ID, &role.Name, &role.Description, &role.BuiltIn, &role.IsDisabled, &scope, &tags, &perms); err != nil {
 		return permissions.Role{}, fmt.Errorf("query role definition: %w", err)
 	}
 
@@ -529,8 +530,11 @@ where id = $1
 	if tags == nil {
 		tags = []string{}
 	}
+	if perms == nil {
+		perms = []string{}
+	}
 	role.Tags = tags
-	role.Permissions = []string{}
+	role.Permissions = perms
 	return role, nil
 }
 

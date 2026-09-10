@@ -25,13 +25,13 @@ func TestRegionalComplianceFence(t *testing.T) {
 		t.Fatalf("deny analyst-global restricted: %v", err)
 	}
 
-	if got := perm.Can(ctx, "analyst-global", "region-us"); got != true {
+	if got := perm.Can(ctx, "analyst-global", "region-us", nil); got != true {
 		t.Fatalf("region-us got %v want true", got)
 	}
-	if got := perm.Can(ctx, "analyst-global", "region-eu"); got != true {
+	if got := perm.Can(ctx, "analyst-global", "region-eu", nil); got != true {
 		t.Fatalf("region-eu got %v want true", got)
 	}
-	if got := perm.Can(ctx, "analyst-global", "region-restricted"); got != false {
+	if got := perm.Can(ctx, "analyst-global", "region-restricted", nil); got != false {
 		t.Fatalf("region-restricted got %v want false", got)
 	}
 }

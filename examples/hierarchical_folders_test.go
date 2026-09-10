@@ -47,22 +47,22 @@ func TestHierarchicalFolders(t *testing.T) {
 	}
 	store.AddGrants(permissions.Grant{OwnerKind: permissions.PrincipalRole, OwnerID: "role.finance_folder_reader", Effect: permissions.EffectDeny, TeamScope: "*", ObjectScope: &payrollPath, PermissionName: perm.ID()})
 
-	if got := perm.CanHierarchical(ctx, "alice", budgetFileID, financeFolderID, workspaceID); got != true {
+	if got := perm.CanHierarchical(ctx, "alice", nil, budgetFileID, financeFolderID, workspaceID); got != true {
 		t.Fatalf("alice budget got %v want true", got)
 	}
-	if got := perm.CanHierarchical(ctx, "alice", payrollFileID, financeFolderID, workspaceID); got != true {
+	if got := perm.CanHierarchical(ctx, "alice", nil, payrollFileID, financeFolderID, workspaceID); got != true {
 		t.Fatalf("alice payroll got %v want true", got)
 	}
-	if got := perm.CanHierarchical(ctx, "bob", budgetFileID, financeFolderID, workspaceID); got != true {
+	if got := perm.CanHierarchical(ctx, "bob", nil, budgetFileID, financeFolderID, workspaceID); got != true {
 		t.Fatalf("bob budget got %v want true", got)
 	}
-	if got := perm.CanHierarchical(ctx, "bob", payrollFileID, financeFolderID, workspaceID); got != false {
+	if got := perm.CanHierarchical(ctx, "bob", nil, payrollFileID, financeFolderID, workspaceID); got != false {
 		t.Fatalf("bob payroll got %v want false", got)
 	}
-	if got := perm.CanHierarchical(ctx, "carol", budgetFileID, financeFolderID, workspaceID); got != false {
+	if got := perm.CanHierarchical(ctx, "carol", nil, budgetFileID, financeFolderID, workspaceID); got != false {
 		t.Fatalf("carol budget got %v want false", got)
 	}
-	if got := perm.CanHierarchical(ctx, "bob", roadmapFileID, engineeringFolderID, workspaceID); got != false {
+	if got := perm.CanHierarchical(ctx, "bob", nil, roadmapFileID, engineeringFolderID, workspaceID); got != false {
 		t.Fatalf("bob roadmap got %v want false", got)
 	}
 

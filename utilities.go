@@ -208,22 +208,28 @@ func (p *ObjectPermission) WithFields(fields []string) *ObjectPermission {
 	return p
 }
 
-func (p *ObjectPermission) Can(ctx context.Context, subject any, objectID string) bool {
+func (p *ObjectPermission) Can(ctx context.Context, subject any, objectID string, teamID *string) bool {
 	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false
 	}
-	return p.CanUserID(ctx, userID, objectID)
+	return p.CanUserID(ctx, userID, objectID, teamID)
 }
 
-func (p *ObjectPermission) CanUserID(ctx context.Context, userID, objectID string) bool {
+func (p *ObjectPermission) CanUserID(ctx context.Context, userID, objectID string, teamID *string) bool {
 	if err := p.ensureChecker(); err != nil {
 		return false
 	}
 	if objectID == "" {
 		return false
 	}
-	ok, err := p.checker.HasPermission(ctx, Request{UserID: userID, Object: objectID, Perm: p.id})
+
+	r := Request{UserID: userID, Object: objectID, Perm: p.id}
+	if teamID != nil {
+		r.TeamID = *teamID
+	}
+
+	ok, err := p.checker.HasPermission(ctx, r)
 	if err != nil {
 		return false
 	}
@@ -231,23 +237,23 @@ func (p *ObjectPermission) CanUserID(ctx context.Context, userID, objectID strin
 	return ok
 }
 
-func (p *ObjectPermission) CanHierarchical(ctx context.Context, subject any, leafID string, parentPath ...string) bool {
+func (p *ObjectPermission) CanHierarchical(ctx context.Context, subject any, teamID *string, leafID string, parentPath ...string) bool {
 	userID, err := extractSubjectID(ctx, p.checker, subject)
 	if err != nil {
 		return false
 	}
-	return p.CanHierarchicalUserID(ctx, userID, leafID, parentPath...)
+	return p.CanHierarchicalUserID(ctx, userID, teamID, leafID, parentPath...)
 }
 
-func (p *ObjectPermission) CanHierarchicalUserID(ctx context.Context, userID, leafID string, parentPath ...string) bool {
+func (p *ObjectPermission) CanHierarchicalUserID(ctx context.Context, userID string, teamID *string, leafID string, parentPath ...string) bool {
 	obj, err := buildHierarchyObject(leafID, parentPath...)
 	if err != nil {
 		return false
 	}
-	return p.CanUserID(ctx, userID, obj)
+	return p.CanUserID(ctx, userID, obj, teamID)
 }
 
-func (p *ObjectPermission) Any(ctx context.Context, subject any, objectIDs ...string) bool {
+func (p *ObjectPermission) Any(ctx context.Context, subject any, teamID *string, objectIDs ...string) bool {
 	if len(objectIDs) == 0 {
 		return false
 	}
@@ -256,7 +262,7 @@ func (p *ObjectPermission) Any(ctx context.Context, subject any, objectIDs ...st
 		return false
 	}
 	for _, objectID := range objectIDs {
-		ok := p.CanUserID(ctx, userID, objectID)
+		ok := p.CanUserID(ctx, userID, objectID, teamID)
 		if ok {
 			return true
 		}
@@ -264,7 +270,7 @@ func (p *ObjectPermission) Any(ctx context.Context, subject any, objectIDs ...st
 	return false
 }
 
-func (p *ObjectPermission) All(ctx context.Context, subject any, objectIDs ...string) bool {
+func (p *ObjectPermission) All(ctx context.Context, subject any, teamID *string, objectIDs ...string) bool {
 	if len(objectIDs) == 0 {
 		return true
 	}
@@ -273,7 +279,7 @@ func (p *ObjectPermission) All(ctx context.Context, subject any, objectIDs ...st
 		return false
 	}
 	for _, objectID := range objectIDs {
-		ok := p.CanUserID(ctx, userID, objectID)
+		ok := p.CanUserID(ctx, userID, objectID, teamID)
 		if !ok {
 			return false
 		}
@@ -281,7 +287,7 @@ func (p *ObjectPermission) All(ctx context.Context, subject any, objectIDs ...st
 	return true
 }
 
-func (p *ObjectPermission) Filter(ctx context.Context, subject any, objectIDs ...string) []string {
+func (p *ObjectPermission) Filter(ctx context.Context, subject any, teamID *string, objectIDs ...string) []string {
 	if len(objectIDs) == 0 {
 		return []string{}
 	}
@@ -291,7 +297,7 @@ func (p *ObjectPermission) Filter(ctx context.Context, subject any, objectIDs ..
 	}
 	allowed := make([]string, 0, len(objectIDs))
 	for _, objectID := range objectIDs {
-		ok := p.CanUserID(ctx, userID, objectID)
+		ok := p.CanUserID(ctx, userID, objectID, teamID)
 		if ok {
 			allowed = append(allowed, objectID)
 		}
@@ -299,7 +305,7 @@ func (p *ObjectPermission) Filter(ctx context.Context, subject any, objectIDs ..
 	return allowed
 }
 
-func (p *ObjectPermission) HierarchicalFilter(ctx context.Context, subject any, leafIDs []string, sharedParentPath []string) []string {
+func (p *ObjectPermission) HierarchicalFilter(ctx context.Context, subject any, teamID *string, leafIDs []string, sharedParentPath []string) []string {
 	if len(leafIDs) == 0 {
 		return []string{}
 	}
@@ -309,7 +315,7 @@ func (p *ObjectPermission) HierarchicalFilter(ctx context.Context, subject any, 
 	}
 	allowed := make([]string, 0, len(leafIDs))
 	for _, leafID := range leafIDs {
-		ok := p.CanHierarchicalUserID(ctx, userID, leafID, sharedParentPath...)
+		ok := p.CanHierarchicalUserID(ctx, userID, teamID, leafID, sharedParentPath...)
 		if ok {
 			allowed = append(allowed, leafID)
 		}

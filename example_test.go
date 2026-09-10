@@ -47,9 +47,9 @@ func ExampleObjectPermission_batch() {
 		"Allows reading a user profile.",
 	).WithChecker(checker)
 
-	any := p.Any(context.Background(), "user-123", "user-2", "user-1")
-	all := p.All(context.Background(), "user-123", "user-2", "user-1")
-	filtered := p.Filter(context.Background(), "user-123", "user-2", "user-1")
+	any := p.Any(context.Background(), "user-123", nil, "user-2", "user-1")
+	all := p.All(context.Background(), "user-123", nil, "user-2", "user-1")
+	filtered := p.Filter(context.Background(), "user-123", nil, "user-2", "user-1")
 
 	fmt.Println(any)
 	fmt.Println(all)
@@ -72,6 +72,7 @@ func ExampleObjectPermission_hierarchicalFilter() {
 	allowed := p.HierarchicalFilter(
 		context.Background(),
 		"user-123",
+		nil,
 		[]string{"file-2", "file-1"},
 		[]string{"folder-2", "workspace-9"},
 	)

@@ -44,10 +44,10 @@ func TestGroupManagerRoles(t *testing.T) {
 	if err := svc.AllowUser(ctx, "user1", managePerm.ID(), &group5); err != nil {
 		t.Fatalf("allow user1 manage group5: %v", err)
 	}
-	if got := managePerm.Can(ctx, "user1", "group5"); got != true {
+	if got := managePerm.Can(ctx, "user1", "group5", nil); got != true {
 		t.Fatalf("user1 group5 manage got %v want true", got)
 	}
-	if got := managePerm.Can(ctx, "user1", "group2"); got != false {
+	if got := managePerm.Can(ctx, "user1", "group2", nil); got != false {
 		t.Fatalf("user1 group2 manage got %v want false", got)
 	}
 
@@ -61,13 +61,13 @@ func TestGroupManagerRoles(t *testing.T) {
 		t.Fatalf("allow role group_manager group5: %v", err)
 	}
 
-	if got := managePerm.Can(ctx, "user3", "group5"); got != true {
+	if got := managePerm.Can(ctx, "user3", "group5", nil); got != true {
 		t.Fatalf("user3 group5 manage got %v want true", got)
 	}
-	if got := managePerm.Can(ctx, "user4", "group5"); got != true {
+	if got := managePerm.Can(ctx, "user4", "group5", nil); got != true {
 		t.Fatalf("user4 group5 manage got %v want true", got)
 	}
-	if got := managePerm.Can(ctx, "user2", "group5"); got != false {
+	if got := managePerm.Can(ctx, "user2", "group5", nil); got != false {
 		t.Fatalf("user2 group5 manage got %v want false", got)
 	}
 

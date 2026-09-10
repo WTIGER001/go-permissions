@@ -21,10 +21,10 @@ func TestGroupOwnershipDelegation(t *testing.T) {
 		t.Fatalf("allow lead-1 on group-a: %v", err)
 	}
 
-	if got := perm.Can(ctx, "lead-1", "group-a"); got != true {
+	if got := perm.Can(ctx, "lead-1", "group-a", nil); got != true {
 		t.Fatalf("group-a got %v want true", got)
 	}
-	if got := perm.Can(ctx, "lead-1", "group-b"); got != false {
+	if got := perm.Can(ctx, "lead-1", "group-b", nil); got != false {
 		t.Fatalf("group-b got %v want false", got)
 	}
 }

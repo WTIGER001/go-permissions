@@ -28,10 +28,10 @@ func TestBreakGlassAdmin(t *testing.T) {
 		t.Fatalf("deny user: %v", err)
 	}
 
-	if got := perm.Can(ctx, "oncall-admin", "incident-41"); got != true {
+	if got := perm.Can(ctx, "oncall-admin", "incident-41", nil); got != true {
 		t.Fatalf("incident-41 got %v want true", got)
 	}
-	if got := perm.Can(ctx, "oncall-admin", "incident-42"); got != false {
+	if got := perm.Can(ctx, "oncall-admin", "incident-42", nil); got != false {
 		t.Fatalf("incident-42 got %v want false", got)
 	}
 }

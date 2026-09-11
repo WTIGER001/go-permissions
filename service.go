@@ -545,7 +545,8 @@ func (s *Service) expandRolesCached(ctx context.Context, rootRoleID string, cach
 
 // EffectivePermissions gets all effective permssion for a user.
 // If teamID "*" is supplied, permissions granted with a team scope will be included as well.
-func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamID string) ([]EffectivePermission, error) {
+// If objectID "*" is supplied, permissions granted with a object scope will be included as well.
+func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamID string, objectID string) ([]EffectivePermission, error) {
 	if userID == "" {
 		return nil, fmt.Errorf("user ID is required")
 	}
@@ -602,7 +603,7 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 		}
 	}
 
-	baseReq := Request{UserID: userID, TeamID: teamID}
+	baseReq := Request{UserID: userID, TeamID: teamID, Object: objectID}
 
 	// Phase 1: unbound principals (user + groups).
 	unboundOwners := make([]PrincipalRef, 0, 1+len(groupIDs))
@@ -654,7 +655,7 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 			}
 			resolvedGrant, err := resolveGrantBindings(grant, bindingMap)
 			if err != nil {
-				return nil, err
+				continue
 			}
 			if teamID != "*" && !matchesTeamScope(resolvedGrant, teamID) {
 				continue
@@ -676,7 +677,7 @@ func (s *Service) AllowedTeamsForUser(ctx context.Context, userID, perm string) 
 		return nil, fmt.Errorf("permission name is required")
 	}
 
-	perms, err := s.EffectivePermissions(ctx, userID, "*")
+	perms, err := s.EffectivePermissions(ctx, userID, "*", "*")
 	if err != nil {
 		return nil, err
 	}

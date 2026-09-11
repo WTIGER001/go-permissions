@@ -404,7 +404,7 @@ func TestEffectivePermissions_DenyRemovesAllow(t *testing.T) {
 	}
 
 	svc := NewServiceWithProviders(store, store)
-	effective, err := svc.EffectivePermissions(context.Background(), "u-1", teamID)
+	effective, err := svc.EffectivePermissions(context.Background(), "u-1", teamID, "*")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -1166,7 +1166,7 @@ func TestEffectivePermissions_MultiTenantRole(t *testing.T) {
 
 	svc := NewServiceWithProviders(store, store)
 
-	eff, err := svc.EffectivePermissions(context.Background(), "u-1", team42)
+	eff, err := svc.EffectivePermissions(context.Background(), "u-1", team42, "*")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

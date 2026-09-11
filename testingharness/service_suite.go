@@ -80,7 +80,7 @@ func (h *Harness) RunAll(t *testing.T) {
 		svc := permissions.NewServiceWithProviders(h.store, h.store)
 
 		expect := h.store.SeedEffectivePermissions(ctx, t)
-		perms, err := svc.EffectivePermissions(ctx, expect.UserID, expect.TeamID)
+		perms, err := svc.EffectivePermissions(ctx, expect.UserID, expect.TeamID, "*")
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}

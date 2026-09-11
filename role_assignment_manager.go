@@ -73,8 +73,17 @@ func (m *RoleAssignmentManager) canMakeAssignmentChange(ctx context.Context, ass
 			proposed = append(proposed, c)
 		}
 	}
+
+	bindingValues := map[string]any{}
+	if m.teamScope != nil {
+		bindingValues["team"] = m.teamScope
+	}
+	if m.objectScope != nil {
+		bindingValues["id"] = m.objectScope
+	}
+
 	for _, a := range add {
-		proposed = append(proposed, RoleAssignment{RoleID: a})
+		proposed = append(proposed, RoleAssignment{RoleID: a, BindingValues: bindingValues})
 	}
 
 	for _, rule := range m.assignmentRules {
@@ -162,7 +171,7 @@ func (m *RoleAssignmentManager) assignRole(ctx context.Context, principal Princi
 		bindings["team"] = *m.teamScope
 	}
 	if m.objectScope != nil {
-		bindings["object"] = *m.objectScope
+		bindings["id"] = *m.objectScope
 	}
 	return m.service.AssignRole(ctx, principal, roleID, bindings)
 }
@@ -174,7 +183,7 @@ func (m *RoleAssignmentManager) unassignRole(ctx context.Context, principal Prin
 		bindings["team"] = *m.teamScope
 	}
 	if m.objectScope != nil {
-		bindings["object"] = *m.objectScope
+		bindings["id"] = *m.objectScope
 	}
 	return m.service.UnassignRole(ctx, principal, roleID, bindings)
 }
@@ -574,6 +583,68 @@ type RequireAtLeastRule struct {
 	Kind   *PrincipalKind
 }
 
+func (r RequireAtLeastRule) ValidateAssignment(current []RoleAssignment, proposed []RoleAssignment, assignee PrincipalRef, _ *PrincipalRef, ram *roleAssignmentManagerBase) error {
+	// Get current assignments for the provided roleID
+	assignments, err := ram.service.RoleAssignmentsForRoleID(context.Background(), r.RoleID)
+	if err != nil {
+		return err
+	}
+
+	currUsersInAssignment := 0
+	currGroupsInAssignment := 0
+	removingUsersInAssignment := 0
+	removingGroupsInAssignment := 0
+
+	byScope := filterAssignmentHitsByScope(assignments, ram.teamScope, ram.objectScope)
+	for _, a := range byScope {
+		// Increase counts of users,groups in specified role
+		if a.PrincipalRef.Kind == PrincipalUser {
+			currUsersInAssignment++
+		}
+		if a.PrincipalRef.Kind == PrincipalGroup {
+			currGroupsInAssignment++
+		}
+	}
+
+	// Cacluate adds and removes
+	adding, removing := diffRoleAssignments(current, proposed, r.RoleID)
+	for range adding {
+		switch assignee.Kind {
+		case PrincipalUser:
+			currUsersInAssignment++
+		case PrincipalGroup:
+			currGroupsInAssignment++
+		}
+	}
+
+	for range removing {
+		switch assignee.Kind {
+		case PrincipalUser:
+			removingUsersInAssignment++
+		case PrincipalGroup:
+			removingGroupsInAssignment++
+		}
+	}
+
+	if r.Kind != nil {
+		if *r.Kind == PrincipalUser && currUsersInAssignment == removingUsersInAssignment {
+			return fmt.Errorf("must have a least %v user assigned to role: %s", r.Min, r.RoleID)
+		}
+
+		if *r.Kind == PrincipalGroup && currGroupsInAssignment == removingGroupsInAssignment {
+			return fmt.Errorf("must have a least %v group assigned to role: %s", r.Min, r.RoleID)
+		}
+
+		return nil
+	}
+
+	if currGroupsInAssignment == removingGroupsInAssignment && currUsersInAssignment == removingUsersInAssignment {
+		return fmt.Errorf("must have a least %v user or group assigned to role: %s", r.Min, r.RoleID)
+	}
+
+	return nil
+}
+
 func (r RequireAtLeastRule) ValidateRemoval(users []string, groups []string, ram *roleAssignmentManagerBase) error {
 	// Get current assignments for the provided roleID
 	assignments, err := ram.service.RoleAssignmentsForRoleID(context.Background(), r.RoleID)
@@ -640,7 +711,7 @@ func filterAssignmentHitsByScope(hits []RoleAssignmentHit, teamScope *string, ob
 
 		// Filter based on object scope
 		if objScope != nil && *objScope != "*" {
-			objVal, ok := hit.BindingValues["object"]
+			objVal, ok := hit.BindingValues["id"]
 			if !ok {
 				continue
 			}
@@ -672,7 +743,7 @@ func filterAssignmentsByScope(roleAssignments []RoleAssignment, teamScope *strin
 
 		// Filter based on object scope
 		if objScope != nil && *objScope != "*" {
-			objVal, ok := ra.BindingValues["object"]
+			objVal, ok := ra.BindingValues["id"]
 			if !ok {
 				continue
 			}
@@ -685,4 +756,45 @@ func filterAssignmentsByScope(roleAssignments []RoleAssignment, teamScope *strin
 	}
 
 	return filtered
+}
+
+// diffRoleAssignments compares current vs proposed role assignments and
+// returns two string slices of RoleIDs:
+//   - adding: IDs present in proposed but not in current
+//   - removing: IDs present in current but not in proposed
+//
+// If roleIDFilter is non-empty, only that RoleID is considered.
+func diffRoleAssignments(current, proposed []RoleAssignment, roleIDFilter string) (adding []string, removing []string) {
+	currentSet := make(map[string]struct{})
+	proposedSet := make(map[string]struct{})
+
+	// Build sets from RoleID
+	for _, ra := range current {
+		if roleIDFilter != "" && ra.RoleID != roleIDFilter {
+			continue
+		}
+		currentSet[ra.RoleID] = struct{}{}
+	}
+	for _, ra := range proposed {
+		if roleIDFilter != "" && ra.RoleID != roleIDFilter {
+			continue
+		}
+		proposedSet[ra.RoleID] = struct{}{}
+	}
+
+	// Items to add: in proposed, not in current
+	for id := range proposedSet {
+		if _, exists := currentSet[id]; !exists {
+			adding = append(adding, id)
+		}
+	}
+
+	// Items to remove: in current, not in proposed
+	for id := range currentSet {
+		if _, exists := proposedSet[id]; !exists {
+			removing = append(removing, id)
+		}
+	}
+
+	return adding, removing
 }

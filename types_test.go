@@ -2,6 +2,12 @@ package permissions
 
 import "testing"
 
+func TestPrincipalRefValidate_Team(t *testing.T) {
+	if err := (PrincipalRef{Kind: PrincipalTeam, ID: "team-1"}).Validate(); err != nil {
+		t.Fatalf("expected team principal to be valid, got %v", err)
+	}
+}
+
 func TestRoleValidation(t *testing.T) {
 	tests := []struct {
 		name    string

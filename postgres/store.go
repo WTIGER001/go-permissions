@@ -35,10 +35,11 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 
 	stmts := []string{
 		`do $$ begin
-			create type principal_type as enum ('user', 'group', 'role');
+			create type principal_type as enum ('user', 'group', 'team', 'role');
 		exception
 			when duplicate_object then null;
 		end $$;`,
+		`alter type principal_type add value if not exists 'team';`,
 		`do $$ begin
 			create type grant_effect as enum ('allow', 'deny');
 		exception
@@ -837,8 +838,8 @@ func (s *Store) AssignRole(ctx context.Context, principal permissions.PrincipalR
 	if err := principal.Validate(); err != nil {
 		return err
 	}
-	if principal.Kind != permissions.PrincipalUser && principal.Kind != permissions.PrincipalGroup {
-		return fmt.Errorf("role assignments support only user or group principals")
+	if principal.Kind != permissions.PrincipalUser && principal.Kind != permissions.PrincipalGroup && principal.Kind != permissions.PrincipalTeam {
+		return fmt.Errorf("role assignments support only user, group, or team principals")
 	}
 	if roleID == "" {
 		return fmt.Errorf("role ID is required")
@@ -891,8 +892,8 @@ func (s *Store) UnassignRole(
 	if err := principal.Validate(); err != nil {
 		return err
 	}
-	if principal.Kind != permissions.PrincipalUser && principal.Kind != permissions.PrincipalGroup {
-		return fmt.Errorf("role assignments support only user or group principals")
+	if principal.Kind != permissions.PrincipalUser && principal.Kind != permissions.PrincipalGroup && principal.Kind != permissions.PrincipalTeam {
+		return fmt.Errorf("role assignments support only user, group, or team principals")
 	}
 	if roleID == "" {
 		return fmt.Errorf("role ID is required")

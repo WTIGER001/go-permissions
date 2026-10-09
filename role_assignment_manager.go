@@ -22,6 +22,8 @@ type RoleAssignmentManager struct {
 }
 
 type PrincipalRemovalRule interface {
+	// Team principal deletion is outside this interface; team role-assignment
+	// changes are validated through RoleAssignmentRule instead.
 	ValidateRemoval(removingUsers, removingGroups []string, manager *roleAssignmentManagerBase) error
 }
 
@@ -311,6 +313,34 @@ func (m *RoleAssignmentManager) CleanupAllRoleAssignments(ctx context.Context) e
 	return merr.ErrorOrNil()
 }
 
+// CleanupTeamRoleAssignments removes all assignments for roles managed by this
+// manager that are directly assigned to teamID. It does not remove assignments
+// made to users or groups, including assignments with a matching team binding.
+func (m *RoleAssignmentManager) CleanupTeamRoleAssignments(ctx context.Context, teamID string) error {
+	team := PrincipalRef{Kind: PrincipalTeam, ID: teamID}
+	if err := team.Validate(); err != nil {
+		return err
+	}
+
+	assignments, err := m.service.RoleAssignmentsForPrincipal(ctx, team)
+	if err != nil {
+		return err
+	}
+
+	var merr *multierror.Error
+	for _, assignment := range assignments {
+		if !contains(m.managedRoles, assignment.RoleID) {
+			continue
+		}
+
+		if err := m.service.UnassignRole(ctx, team, assignment.RoleID, assignment.BindingValues); err != nil {
+			merr = multierror.Append(merr, err)
+		}
+	}
+
+	return merr.ErrorOrNil()
+}
+
 func contains(list []string, target string) bool {
 	for _, v := range list {
 		if v == target {
@@ -502,6 +532,7 @@ func (r MinMaxInstancesRule) ValidateAssignment(
 	// Count final totals after applying the proposed mutation
 	userCount := 0
 	groupCount := 0
+	teamCount := 0
 
 	for _, assignment := range filtered {
 		id := assignment.PrincipalRef.ID
@@ -518,6 +549,8 @@ func (r MinMaxInstancesRule) ValidateAssignment(
 				userCount++
 			case PrincipalGroup:
 				groupCount++
+			case PrincipalTeam:
+				teamCount++
 			}
 		}
 	}
@@ -551,12 +584,25 @@ func (r MinMaxInstancesRule) ValidateAssignment(
 					r.RoleID, r.Max, groupCount,
 				)
 			}
+		case PrincipalTeam:
+			if teamCount < r.Min {
+				return fmt.Errorf(
+					"role %s requires at least %d teams, but only %d would remain",
+					r.RoleID, r.Min, teamCount,
+				)
+			}
+			if r.Max > 0 && teamCount > r.Max {
+				return fmt.Errorf(
+					"role %s allows at most %d teams, but %d would exist",
+					r.RoleID, r.Max, teamCount,
+				)
+			}
 		}
 		return nil
 	}
 
-	// No Kind restriction → enforce totals across users + groups
-	total := userCount + groupCount
+	// No Kind restriction → enforce totals across users, groups, and teams.
+	total := userCount + groupCount + teamCount
 
 	if total < r.Min {
 		return fmt.Errorf(
@@ -592,8 +638,10 @@ func (r RequireAtLeastRule) ValidateAssignment(current []RoleAssignment, propose
 
 	currUsersInAssignment := 0
 	currGroupsInAssignment := 0
+	currTeamsInAssignment := 0
 	removingUsersInAssignment := 0
 	removingGroupsInAssignment := 0
+	removingTeamsInAssignment := 0
 
 	byScope := filterAssignmentHitsByScope(assignments, ram.teamScope, ram.objectScope)
 	for _, a := range byScope {
@@ -603,6 +651,9 @@ func (r RequireAtLeastRule) ValidateAssignment(current []RoleAssignment, propose
 		}
 		if a.PrincipalRef.Kind == PrincipalGroup {
 			currGroupsInAssignment++
+		}
+		if a.PrincipalRef.Kind == PrincipalTeam {
+			currTeamsInAssignment++
 		}
 	}
 
@@ -614,6 +665,8 @@ func (r RequireAtLeastRule) ValidateAssignment(current []RoleAssignment, propose
 			currUsersInAssignment++
 		case PrincipalGroup:
 			currGroupsInAssignment++
+		case PrincipalTeam:
+			currTeamsInAssignment++
 		}
 	}
 
@@ -623,6 +676,8 @@ func (r RequireAtLeastRule) ValidateAssignment(current []RoleAssignment, propose
 			removingUsersInAssignment++
 		case PrincipalGroup:
 			removingGroupsInAssignment++
+		case PrincipalTeam:
+			removingTeamsInAssignment++
 		}
 	}
 
@@ -634,12 +689,15 @@ func (r RequireAtLeastRule) ValidateAssignment(current []RoleAssignment, propose
 		if *r.Kind == PrincipalGroup && currGroupsInAssignment == removingGroupsInAssignment {
 			return fmt.Errorf("must have a least %v group assigned to role: %s", r.Min, r.RoleID)
 		}
+		if *r.Kind == PrincipalTeam && currTeamsInAssignment == removingTeamsInAssignment {
+			return fmt.Errorf("must have a least %v team assigned to role: %s", r.Min, r.RoleID)
+		}
 
 		return nil
 	}
 
-	if currGroupsInAssignment == removingGroupsInAssignment && currUsersInAssignment == removingUsersInAssignment {
-		return fmt.Errorf("must have a least %v user or group assigned to role: %s", r.Min, r.RoleID)
+	if currGroupsInAssignment == removingGroupsInAssignment && currUsersInAssignment == removingUsersInAssignment && currTeamsInAssignment == removingTeamsInAssignment {
+		return fmt.Errorf("must have a least %v user, group, or team assigned to role: %s", r.Min, r.RoleID)
 	}
 
 	return nil
@@ -654,8 +712,10 @@ func (r RequireAtLeastRule) ValidateRemoval(users []string, groups []string, ram
 
 	currUsersInAssignment := 0
 	currGroupsInAssignment := 0
+	currTeamsInAssignment := 0
 	removingUsersInAssignment := 0
 	removingGroupsInAssignment := 0
+	removingTeamsInAssignment := 0
 
 	byScope := filterAssignmentHitsByScope(assignments, ram.teamScope, ram.objectScope)
 
@@ -669,9 +729,12 @@ func (r RequireAtLeastRule) ValidateRemoval(users []string, groups []string, ram
 		}
 		if a.PrincipalRef.Kind == PrincipalGroup {
 			currGroupsInAssignment++
-			if slices.Contains(users, a.PrincipalRef.ID) {
+			if slices.Contains(groups, a.PrincipalRef.ID) {
 				removingGroupsInAssignment++
 			}
+		}
+		if a.PrincipalRef.Kind == PrincipalTeam {
+			currTeamsInAssignment++
 		}
 	}
 
@@ -683,12 +746,15 @@ func (r RequireAtLeastRule) ValidateRemoval(users []string, groups []string, ram
 		if *r.Kind == PrincipalGroup && currGroupsInAssignment == removingGroupsInAssignment {
 			return fmt.Errorf("must have a least %v group assigned to role: %s", r.Min, r.RoleID)
 		}
+		if *r.Kind == PrincipalTeam && currTeamsInAssignment == removingTeamsInAssignment {
+			return fmt.Errorf("must have a least %v team assigned to role: %s", r.Min, r.RoleID)
+		}
 
 		return nil
 	}
 
-	if currGroupsInAssignment == removingGroupsInAssignment && currUsersInAssignment == removingUsersInAssignment {
-		return fmt.Errorf("must have a least %v user or group assigned to role: %s", r.Min, r.RoleID)
+	if currGroupsInAssignment == removingGroupsInAssignment && currUsersInAssignment == removingUsersInAssignment && currTeamsInAssignment == removingTeamsInAssignment {
+		return fmt.Errorf("must have a least %v user, group, or team assigned to role: %s", r.Min, r.RoleID)
 	}
 
 	return nil

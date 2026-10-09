@@ -52,6 +52,32 @@ func TestJSONStore_SaveLoadAndHasPermission(t *testing.T) {
 	}
 }
 
+func TestJSONStore_TeamRoleAssignmentsPersist(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "permissions.json")
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	team := permissions.PrincipalRef{Kind: permissions.PrincipalTeam, ID: "team-1"}
+	if err := store.AssignRole(ctx, team, "role.team-reader", nil, map[string]any{"scope": "all"}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	reloaded, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("reload store: %v", err)
+	}
+	assignments, err := reloaded.RoleAssignmentsForPrincipal(ctx, team)
+	if err != nil || len(assignments) != 1 {
+		t.Fatalf("RoleAssignmentsForPrincipal: assignments=%+v, err=%v", assignments, err)
+	}
+	hits, err := reloaded.RoleAssignmentsForRoleID(ctx, "role.team-reader")
+	if err != nil || len(hits) != 1 || hits[0].Kind != permissions.PrincipalTeam {
+		t.Fatalf("RoleAssignmentsForRoleID: hits=%+v, err=%v", hits, err)
+	}
+}
+
 func TestJSONStore_ListPrincipalsWithGrant_DenyOverridesAllow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "permissions.json")
 

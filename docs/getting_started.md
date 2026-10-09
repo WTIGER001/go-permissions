@@ -1,5 +1,9 @@
 # Getting Started with `go-permissions`
 
+## Team role assignments
+
+Teams can be role-assignment principals: assign a role with `PrincipalRef{Kind: permissions.PrincipalTeam, ID: teamID}`. During permission evaluation, `Service` obtains the user's teams from `IdentityProvider.GetUserTeams`, so the identity provider remains the source of truth for team membership (including memberships inherited through groups). Teams are not a membership store in this library and cannot own direct permission grants; grant permissions to the assigned role instead.
+
 `go-permissions` is a high-performance, release-safe authorization library for Go applications. It manages built-in system roles and default grants in memory while tracking custom roles, group/user assignments, and administrative overrides in PostgreSQL or other stores.
 
 ---

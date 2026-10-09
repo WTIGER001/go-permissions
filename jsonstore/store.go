@@ -20,6 +20,7 @@ type Data struct {
 	TeamMembership       map[string][]Entry                      `json:"team_membership"`
 	UserRoleAssignments  map[string][]permissions.RoleAssignment `json:"user_role_assignments"`
 	GroupRoleAssignments map[string][]permissions.RoleAssignment `json:"group_role_assignments"`
+	TeamRoleAssignments  map[string][]permissions.RoleAssignment `json:"team_role_assignments"`
 	// RoleInheritance stores the direct parent->children edges for persistence.
 	RoleInheritance map[string][]string `json:"role_inheritance"`
 	// RoleExpansion is kept for backward-compatible test seeding only.
@@ -144,9 +145,11 @@ func (s *Store) AssignRole(_ context.Context, principal permissions.PrincipalRef
 		s.data.UserRoleAssignments[principal.ID] = append(s.data.UserRoleAssignments[principal.ID], assignment)
 	case permissions.PrincipalGroup:
 		s.data.GroupRoleAssignments[principal.ID] = append(s.data.GroupRoleAssignments[principal.ID], assignment)
+	case permissions.PrincipalTeam:
+		s.data.TeamRoleAssignments[principal.ID] = append(s.data.TeamRoleAssignments[principal.ID], assignment)
 	default:
 		s.mu.Unlock()
-		return fmt.Errorf("role assignments support only user or group principals")
+		return fmt.Errorf("role assignments support only user, group, or team principals")
 	}
 	s.mu.Unlock()
 
@@ -176,9 +179,11 @@ func (s *Store) UnassignRole(
 		assignments = s.data.UserRoleAssignments[principal.ID]
 	case permissions.PrincipalGroup:
 		assignments = s.data.GroupRoleAssignments[principal.ID]
+	case permissions.PrincipalTeam:
+		assignments = s.data.TeamRoleAssignments[principal.ID]
 	default:
 		s.mu.Unlock()
-		return fmt.Errorf("role assignments support only user or group principals")
+		return fmt.Errorf("role assignments support only user, group, or team principals")
 	}
 
 	// Filter out matching roleID + matching binding values
@@ -203,6 +208,12 @@ func (s *Store) UnassignRole(
 			delete(s.data.GroupRoleAssignments, principal.ID)
 		} else {
 			s.data.GroupRoleAssignments[principal.ID] = filtered
+		}
+	case permissions.PrincipalTeam:
+		if len(filtered) == 0 {
+			delete(s.data.TeamRoleAssignments, principal.ID)
+		} else {
+			s.data.TeamRoleAssignments[principal.ID] = filtered
 		}
 	}
 	s.mu.Unlock()
@@ -342,6 +353,8 @@ func (s *Store) RoleAssignmentsForPrincipal(_ context.Context, principal permiss
 		return cloneRoleAssignments(s.data.UserRoleAssignments[principal.ID]), nil
 	case permissions.PrincipalGroup:
 		return cloneRoleAssignments(s.data.GroupRoleAssignments[principal.ID]), nil
+	case permissions.PrincipalTeam:
+		return cloneRoleAssignments(s.data.TeamRoleAssignments[principal.ID]), nil
 	default:
 		return nil, nil
 	}
@@ -380,6 +393,18 @@ func (s *Store) RoleAssignmentsForRoleID(_ context.Context, roleID string) ([]pe
 						Kind: permissions.PrincipalGroup,
 						ID:   groupid,
 					},
+				})
+			}
+		}
+	}
+
+	for teamID, assignments := range s.data.TeamRoleAssignments {
+		for _, assignment := range assignments {
+			if assignment.RoleID == roleID {
+				results = append(results, permissions.RoleAssignmentHit{
+					RoleID:        roleID,
+					BindingValues: assignment.BindingValues,
+					PrincipalRef:  permissions.PrincipalRef{Kind: permissions.PrincipalTeam, ID: teamID},
 				})
 			}
 		}
@@ -719,6 +744,7 @@ func emptyData() Data {
 		UserGroups:           map[string][]string{},
 		UserRoleAssignments:  map[string][]permissions.RoleAssignment{},
 		GroupRoleAssignments: map[string][]permissions.RoleAssignment{},
+		TeamRoleAssignments:  map[string][]permissions.RoleAssignment{},
 		RoleInheritance:      map[string][]string{},
 		RoleExpansion:        map[string][]string{},
 		Grants:               []permissions.Grant{},
@@ -734,6 +760,9 @@ func normalizeData(data Data) Data {
 	}
 	if data.GroupRoleAssignments == nil {
 		data.GroupRoleAssignments = map[string][]permissions.RoleAssignment{}
+	}
+	if data.TeamRoleAssignments == nil {
+		data.TeamRoleAssignments = map[string][]permissions.RoleAssignment{}
 	}
 	if data.RoleInheritance == nil {
 		data.RoleInheritance = map[string][]string{}
@@ -760,6 +789,9 @@ func cloneData(data Data) Data {
 
 	for groupID, assignments := range data.GroupRoleAssignments {
 		cloned.GroupRoleAssignments[groupID] = cloneRoleAssignments(assignments)
+	}
+	for teamID, assignments := range data.TeamRoleAssignments {
+		cloned.TeamRoleAssignments[teamID] = cloneRoleAssignments(assignments)
 	}
 
 	for roleID, children := range data.RoleInheritance {

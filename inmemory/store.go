@@ -13,6 +13,7 @@ import (
 type Store struct {
 	userRoleAssignments  map[string][]permissions.RoleAssignment
 	groupRoleAssignments map[string][]permissions.RoleAssignment
+	teamRoleAssignments  map[string][]permissions.RoleAssignment
 	// roleExpansion holds the explicitly set expansion for testing convenience
 	// (legacy helper kept for direct test seeding; AddRoleInheritance is preferred).
 	roleExpansion map[string][]string
@@ -29,6 +30,7 @@ func NewStore() *Store {
 	return &Store{
 		userRoleAssignments:  map[string][]permissions.RoleAssignment{},
 		groupRoleAssignments: map[string][]permissions.RoleAssignment{},
+		teamRoleAssignments:  map[string][]permissions.RoleAssignment{},
 		roleExpansion:        map[string][]string{},
 		roleInheritance:      map[string]map[string]bool{},
 		roleClosure:          map[string]map[string]bool{},
@@ -83,6 +85,25 @@ func (s *Store) RemoveGroupRoleAssignment(groupID string, roleID string, binding
 		delete(s.groupRoleAssignments, groupID)
 	} else {
 		s.groupRoleAssignments[groupID] = filtered
+	}
+}
+
+func (s *Store) AddTeamRoleAssignments(teamID string, assignments ...permissions.RoleAssignment) {
+	s.teamRoleAssignments[teamID] = append(s.teamRoleAssignments[teamID], assignments...)
+}
+
+func (s *Store) RemoveTeamRoleAssignment(teamID string, roleID string, bindingValues map[string]any) {
+	assignments := s.teamRoleAssignments[teamID]
+	filtered := assignments[:0]
+	for _, ra := range assignments {
+		if !(ra.RoleID == roleID && permissions.BindingValuesEqual(ra.BindingValues, bindingValues)) {
+			filtered = append(filtered, ra)
+		}
+	}
+	if len(filtered) == 0 {
+		delete(s.teamRoleAssignments, teamID)
+	} else {
+		s.teamRoleAssignments[teamID] = filtered
 	}
 }
 
@@ -164,8 +185,10 @@ func (s *Store) AssignRole(_ context.Context, principal permissions.PrincipalRef
 		s.AddUserRoleAssignments(principal.ID, assignment)
 	case permissions.PrincipalGroup:
 		s.AddGroupRoleAssignments(principal.ID, assignment)
+	case permissions.PrincipalTeam:
+		s.AddTeamRoleAssignments(principal.ID, assignment)
 	default:
-		return fmt.Errorf("role assignments support only user or group principals")
+		return fmt.Errorf("role assignments support only user, group, or team principals")
 	}
 
 	return nil
@@ -181,8 +204,10 @@ func (s *Store) UnassignRole(_ context.Context, principal permissions.PrincipalR
 		s.RemoveUserRoleAssignment(principal.ID, roleID, bindingValues)
 	case permissions.PrincipalGroup:
 		s.RemoveGroupRoleAssignment(principal.ID, roleID, bindingValues)
+	case permissions.PrincipalTeam:
+		s.RemoveTeamRoleAssignment(principal.ID, roleID, bindingValues)
 	default:
-		return fmt.Errorf("role unassignments support only user or group principals")
+		return fmt.Errorf("role unassignments support only user, group, or team principals")
 	}
 
 	return nil
@@ -194,6 +219,8 @@ func (s *Store) RoleAssignmentsForPrincipal(_ context.Context, principal permiss
 		return append([]permissions.RoleAssignment(nil), s.userRoleAssignments[principal.ID]...), nil
 	case permissions.PrincipalGroup:
 		return append([]permissions.RoleAssignment(nil), s.groupRoleAssignments[principal.ID]...), nil
+	case permissions.PrincipalTeam:
+		return append([]permissions.RoleAssignment(nil), s.teamRoleAssignments[principal.ID]...), nil
 	default:
 		return nil, nil
 	}
@@ -229,6 +256,18 @@ func (s *Store) RoleAssignmentsForRoleID(_ context.Context, roleID string) ([]pe
 						Kind: permissions.PrincipalGroup,
 						ID:   groupid,
 					},
+				})
+			}
+		}
+	}
+
+	for teamID, assignments := range s.teamRoleAssignments {
+		for _, assignment := range assignments {
+			if assignment.RoleID == roleID {
+				results = append(results, permissions.RoleAssignmentHit{
+					RoleID:        roleID,
+					BindingValues: assignment.BindingValues,
+					PrincipalRef:  permissions.PrincipalRef{Kind: permissions.PrincipalTeam, ID: teamID},
 				})
 			}
 		}

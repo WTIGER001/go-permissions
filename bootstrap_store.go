@@ -508,7 +508,7 @@ func parsePrincipalKey(key string) (PrincipalRef, error) {
 	id := parts[1]
 
 	switch kind {
-	case PrincipalUser, PrincipalGroup, PrincipalRole:
+	case PrincipalUser, PrincipalGroup, PrincipalTeam, PrincipalRole:
 		// valid kinds
 	default:
 		return PrincipalRef{}, fmt.Errorf("invalid principal kind: %s", kind)

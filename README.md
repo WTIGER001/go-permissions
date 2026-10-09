@@ -1,5 +1,9 @@
 # go-permissions
 
+## Team role assignments
+
+Teams are principals that can receive role assignments (`PrincipalTeam`). Team membership is resolved at authorization time by the configured `IdentityProvider` through `GetUserTeams`; this supports providers whose teams contain users, groups, or both. `go-permissions` does not store team membership itself, and teams cannot own direct grants. Assign a role to a team and grant permissions to that role instead.
+
 A high-performance, release-safe Go authorization library featuring:
 
 1. **In-Memory Built-In Roles (`builtin.*`)**: Built-in system roles and default grants managed entirely in memory with zero SQL seeding or migration overhead.

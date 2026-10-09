@@ -333,13 +333,17 @@ func (s *Service) evaluatePermission(ctx context.Context, req Request, fieldPath
 	if err != nil {
 		return false, err
 	}
-
-	roleAssignments, err := s.resolveRoleAssignmentsForUserAndGroups(ctx, req.UserID, groupIDs)
+	teamIDs, err := s.resolveUserTeamIDs(ctx, req.UserID)
 	if err != nil {
 		return false, err
 	}
 
-	// Phase 1: evaluate grants for the user and their groups and teams (no binding resolution needed).
+	roleAssignments, err := s.resolveRoleAssignmentsForUserGroupsAndTeams(ctx, req.UserID, groupIDs, teamIDs)
+	if err != nil {
+		return false, err
+	}
+
+	// Phase 1: evaluate direct grants for the user and their groups (no binding resolution needed).
 	unboundOwners := make([]PrincipalRef, 0, 1+len(groupIDs))
 	if req.UserID != "" {
 		unboundOwners = append(unboundOwners, PrincipalRef{Kind: PrincipalUser, ID: req.UserID})
@@ -557,8 +561,12 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 	if err != nil {
 		return nil, err
 	}
+	teamIDs, err := s.resolveUserTeamIDs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 
-	roleAssignments, err := s.resolveRoleAssignmentsForUserAndGroups(ctx, userID, groupIDs)
+	roleAssignments, err := s.resolveRoleAssignmentsForUserGroupsAndTeams(ctx, userID, groupIDs, teamIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +613,7 @@ func (s *Service) EffectivePermissions(ctx context.Context, userID string, teamI
 
 	baseReq := Request{UserID: userID, TeamID: teamID, Object: objectID}
 
-	// Phase 1: unbound principals (user + groups).
+	// Phase 1: direct-grant principals (user + groups).
 	unboundOwners := make([]PrincipalRef, 0, 1+len(groupIDs))
 	unboundOwners = append(unboundOwners, PrincipalRef{Kind: PrincipalUser, ID: userID})
 	for _, groupID := range groupIDs {
@@ -924,7 +932,30 @@ func (s *Service) resolveUserGroupIDs(ctx context.Context, userID string) ([]str
 	return result, nil
 }
 
-func (s *Service) resolveRoleAssignmentsForUserAndGroups(ctx context.Context, userID string, groupIDs []string) ([]RoleAssignment, error) {
+func (s *Service) resolveUserTeamIDs(ctx context.Context, userID string) ([]string, error) {
+	if userID == "" || s.identity == nil {
+		return nil, nil
+	}
+
+	teamIDs, err := s.identity.GetUserTeams(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]string, 0, len(teamIDs))
+	seen := map[string]bool{}
+	for _, teamID := range teamIDs {
+		if seen[teamID] {
+			continue
+		}
+		seen[teamID] = true
+		result = append(result, teamID)
+	}
+
+	return result, nil
+}
+
+func (s *Service) resolveRoleAssignmentsForUserGroupsAndTeams(ctx context.Context, userID string, groupIDs, teamIDs []string) ([]RoleAssignment, error) {
 	result := []RoleAssignment{}
 
 	// Deduplicate on the (RoleID, BindingValues) pair so that identical duplicate
@@ -992,6 +1023,13 @@ func (s *Service) resolveRoleAssignmentsForUserAndGroups(ctx context.Context, us
 			return nil, err
 		}
 		appendUnique(groupAssignments)
+	}
+	for _, teamID := range teamIDs {
+		teamAssignments, err := s.permissions.RoleAssignmentsForPrincipal(ctx, PrincipalRef{Kind: PrincipalTeam, ID: teamID})
+		if err != nil {
+			return nil, err
+		}
+		appendUnique(teamAssignments)
 	}
 
 	appendUnique(s.syntheticRoleAssignments(userID, groupIDs))

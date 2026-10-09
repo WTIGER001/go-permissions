@@ -156,6 +156,32 @@ func TestPostgres_CRUD_GrantsAndAssignments(t *testing.T) {
 	}
 }
 
+func TestPostgres_CRUD_TeamRoleAssignment(t *testing.T) {
+	store, pool := newTestStore(t)
+	defer pool.Close()
+	ctx := context.Background()
+	team := permissions.PrincipalRef{Kind: permissions.PrincipalTeam, ID: "team-crud"}
+	bindingValues := map[string]any{"scope": "all"}
+
+	if err := store.CreateRole(ctx, permissions.Role{ID: "role.team-reader", Name: "Team Reader"}); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	if err := store.AssignRole(ctx, team, "role.team-reader", nil, bindingValues); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+	assignments, err := store.RoleAssignmentsForPrincipal(ctx, team)
+	if err != nil || len(assignments) != 1 {
+		t.Fatalf("RoleAssignmentsForPrincipal: assignments=%+v, err=%v", assignments, err)
+	}
+	hits, err := store.RoleAssignmentsForRoleID(ctx, "role.team-reader")
+	if err != nil || len(hits) != 1 || hits[0].Kind != permissions.PrincipalTeam {
+		t.Fatalf("RoleAssignmentsForRoleID: hits=%+v, err=%v", hits, err)
+	}
+	if err := store.UnassignRole(ctx, team, "role.team-reader", nil, bindingValues); err != nil {
+		t.Fatalf("UnassignRole: %v", err)
+	}
+}
+
 func TestPostgres_CRUD_BuiltIns(t *testing.T) {
 	store, pool := newTestStore(t)
 	defer pool.Close()

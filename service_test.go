@@ -76,10 +76,43 @@ func (m *mockStore) RoleDefinition(_ context.Context, roleID string) (Role, erro
 }
 
 func (m *mockStore) RoleAssignmentsForPrincipal(_ context.Context, principal PrincipalRef) ([]RoleAssignment, error) {
-	if principal.Kind == PrincipalUser || principal.Kind == PrincipalGroup {
+	if principal.Kind == PrincipalUser || principal.Kind == PrincipalGroup || principal.Kind == PrincipalTeam {
 		return append([]RoleAssignment(nil), m.roleAssignments...), m.err
 	}
 	return nil, m.err
+}
+
+func TestHasPermission_TeamRoleAssignment(t *testing.T) {
+	store := &mockStore{
+		teamIDs:         []string{"team-1", "team-1"},
+		roleAssignments: []RoleAssignment{{RoleID: "role.team-reader"}},
+		grants: []Grant{{
+			OwnerKind:      PrincipalRole,
+			OwnerID:        "role.team-reader",
+			Effect:         EffectAllow,
+			TeamScope:      "*",
+			PermissionName: "documents.read",
+		}},
+	}
+
+	svc := NewServiceWithProviders(store, store)
+	allowed, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", Perm: "documents.read"})
+	if err != nil {
+		t.Fatalf("HasPermission: %v", err)
+	}
+	if !allowed {
+		t.Fatal("expected role assigned through a team to allow permission")
+	}
+}
+
+func TestHasPermission_TeamLookupError(t *testing.T) {
+	store := &mockStore{identityErr: context.DeadlineExceeded}
+	svc := NewServiceWithProviders(store, store)
+
+	_, err := svc.HasPermission(context.Background(), Request{UserID: "u-1", Perm: "documents.read"})
+	if err == nil {
+		t.Fatal("expected identity-provider error")
+	}
 }
 
 func (m *mockStore) RoleAssignmentsForRoleID(_ context.Context, roleID string) ([]RoleAssignmentHit, error) {

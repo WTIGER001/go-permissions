@@ -19,6 +19,7 @@ type PrincipalKind string
 const (
 	PrincipalUser  PrincipalKind = "user"
 	PrincipalGroup PrincipalKind = "group"
+	PrincipalTeam  PrincipalKind = "team"
 	PrincipalRole  PrincipalKind = "role"
 )
 
@@ -110,7 +111,7 @@ func (r PrincipalRef) Validate() error {
 		return fmt.Errorf("principal ID is required")
 	}
 	switch r.Kind {
-	case PrincipalUser, PrincipalGroup, PrincipalRole:
+	case PrincipalUser, PrincipalGroup, PrincipalTeam, PrincipalRole:
 		return nil
 	default:
 		return fmt.Errorf("unsupported principal kind: %q", r.Kind)
